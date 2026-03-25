@@ -433,38 +433,62 @@ export class Player {
     const goalX = this.team === 'team1' ? 0 : pitch.width;
     const goalY = pitch.height / 2;
     const goalWidth = pitch.goalWidth || 3;
-    
+
     // If holding ball, throw after delay
     if (this.holdingBall) {
       this.holdTime += dt;
-      if (this.holdTime > 1.5) {
+      if (this.holdTime > 1.0) {
         this.throwBall(ball, pitch);
       }
       return;
     }
-    
+
     // Track ball on goal line
     const targetX = goalX + (this.team === 'team1' ? 0.5 : -0.5);
     const targetY = Math.max(goalY - goalWidth/2 + 0.5, Math.min(goalY + goalWidth/2 - 0.5, ball.position.y));
-    
+
     const dx = targetX - this.position.x;
     const dy = targetY - this.position.y;
     const dist = Math.sqrt(dx * dx + dy * dy);
-    
+
     if (dist > 0.2) {
-      const speed = 3;
+      const speed = 4;
       this.velocity.x = (dx / dist) * speed;
       this.velocity.y = (dy / dist) * speed;
     } else {
       this.velocity.x = 0;
       this.velocity.y = 0;
     }
-    
-    // Try to catch if ball close
+
+    // Try to catch if ball close and fast (only if not on cooldown from recent clear)
     const ballDist = this.distanceTo(ball.position);
-    if (ballDist < 1.0 && ball.getSpeed() > 5 && ball.position.y > goalY - goalWidth && ball.position.y < goalY + goalWidth) {
+    const inGoalWidth = ball.position.y > goalY - goalWidth && ball.position.y < goalY + goalWidth;
+
+    if (ballDist < 1.2 && ball.getSpeed() > 5 && inGoalWidth && this.kickCooldown <= 0) {
       this.catchBall(ball);
+      return;
     }
+
+    // Kick the ball away if close (even if slow) - clearance!
+    if (ballDist < this.influenceRadius && this.kickCooldown <= 0 && !ball.heldBy) {
+      this.clearBall(ball, pitch);
+    }
+  }
+
+  clearBall(ball, pitch) {
+    // Kick the ball away from goal
+    const kickDir = this.team === 'team1' ? 1 : -1; // Kick towards opponent's goal
+    const power = 12 + Math.random() * 6;
+
+    // Aim towards the side with more space
+    const centerY = pitch.height / 2;
+    const sideBias = ball.position.y > centerY ? 0.4 : -0.4;
+
+    ball.velocity.x = kickDir * power;
+    ball.velocity.y = sideBias * power * 0.6;
+    ball.spin = (Math.random() - 0.5) * 6;
+
+    this.kickCooldown = 0.4;
   }
   
   catchBall(ball) {
