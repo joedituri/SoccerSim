@@ -267,20 +267,19 @@ export class Player {
       } else {
         targetX = this.team === 'team1' ? centerX - 3 : centerX + 3;
       }
-      targetY = centerY;
+      // Spread into open space rather than clustering at center
+      const wide = this.role === 'defender' ? 3 : 4.5;
+      targetY = this._bestOpenY(targetX, centerY, wide, pitch, allPlayers);
       speed = 2;
     } else if (mateHasBall) {
       const ad = attackDir(this.team);
       const ahead = this.role === 'attacker' ? 1.15 : this.role === 'defender' ? 0.55 : 0.85;
       const wide =
         this.role === 'attacker' ? 5 : this.role === 'defender' ? 2.5 : 3.5;
-      const lane = (this.id % 3) - 1;
-      targetX =
-        perceivedBall.position.x +
-        ad * AI.supportAhead * ahead;
-      targetY = perceivedBall.position.y + lane * wide;
-      targetY = Math.max(1.2, Math.min(pitch.height - 1.2, targetY));
+      targetX = perceivedBall.position.x + ad * AI.supportAhead * ahead;
       targetX = Math.max(1.2, Math.min(pitch.width - 1.2, targetX));
+      // Find the Y position most open from opponents within role-appropriate spread
+      targetY = this._bestOpenY(targetX, perceivedBall.position.y, wide, pitch, allPlayers);
       speed = 5.2;
     } else if (oppHasBall && !isChaser) {
       const b = AI.defendGoalBlend;
@@ -318,6 +317,51 @@ export class Player {
     }
   }
   
+  /**
+   * Find the Y position most open from opponents within a spread range around centerY.
+   * Samples candidate positions and scores each by distance to nearest opponent
+   * (favoring open space) and distance to nearest teammate (favoring spread).
+   */
+  _bestOpenY(atX, centerY, spread, pitch, allPlayers) {
+    const steps = 8;
+    let bestY = centerY;
+    let bestScore = -Infinity;
+
+    for (let i = 0; i <= steps; i++) {
+      const cy = Math.max(1.2, Math.min(pitch.height - 1.2,
+        centerY - spread + i * (spread * 2 / steps)));
+
+      // Distance to nearest opponent at this candidate position
+      let minOppDist = Infinity;
+      for (const p of allPlayers) {
+        if (p.team === this.team) continue;
+        const dx = atX - p.position.x;
+        const dy = cy - p.position.y;
+        const d = Math.sqrt(dx * dx + dy * dy);
+        if (d < minOppDist) minOppDist = d;
+      }
+
+      // Distance to nearest teammate (prefer spreading out)
+      let minTeamDist = Infinity;
+      for (const p of allPlayers) {
+        if (p === this || p.team !== this.team || p.isGoalkeeper) continue;
+        const dx = atX - p.position.x;
+        const dy = cy - p.position.y;
+        const d = Math.sqrt(dx * dx + dy * dy);
+        if (d < minTeamDist) minTeamDist = d;
+      }
+
+      // Score: weight open space from opponents heavily, teammate spread lightly
+      const score = minOppDist * 0.65 + Math.min(minTeamDist, 8) * 0.35;
+      if (score > bestScore) {
+        bestScore = score;
+        bestY = cy;
+      }
+    }
+
+    return bestY;
+  }
+
   _openSideBias(allPlayers) {
     let best = null;
     let bestD = Infinity;
