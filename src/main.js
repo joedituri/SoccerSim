@@ -19,16 +19,18 @@ const collisionSystem = new CollisionSystem();
 
 const ball = new Ball(CONFIG.pitch.width / 2, CONFIG.pitch.height / 2);
 
-// Create players - 4v4 (GK + 3 outfield per team)
+// Create players - 5v5 (GK + 4 outfield per team)
 const players = [
   new Player(0, 'team1', 'goalkeeper'),
   new Player(1, 'team1', 'defender'),
   new Player(2, 'team1', 'midfielder'),
-  new Player(3, 'team1', 'attacker'),
-  new Player(4, 'team2', 'goalkeeper'),
-  new Player(5, 'team2', 'defender'),
-  new Player(6, 'team2', 'midfielder'),
-  new Player(7, 'team2', 'attacker'),
+  new Player(3, 'team1', 'midfielder'),
+  new Player(4, 'team1', 'attacker'),
+  new Player(5, 'team2', 'goalkeeper'),
+  new Player(6, 'team2', 'defender'),
+  new Player(7, 'team2', 'midfielder'),
+  new Player(8, 'team2', 'midfielder'),
+  new Player(9, 'team2', 'attacker'),
 ];
 
 let score = { team1: 0, team2: 0 };
@@ -43,16 +45,18 @@ function setInitialPositions() {
   const cy = CONFIG.pitch.height / 2;
   // Team 1 (left side, attacks right)
   players[0].position = { x: 1, y: cy };                    // GK
-  players[1].position = { x: cx - 8, y: cy - 4 };          // Defender (low)
-  players[2].position = { x: cx - 3, y: cy };              // Midfielder (center)
-  players[3].position = { x: cx + 5, y: cy + 4 };          // Attacker (high)
+  players[1].position = { x: cx - 10, y: cy - 5 };         // Defender (low)
+  players[2].position = { x: cx - 4, y: cy - 3 };          // Midfielder (low)
+  players[3].position = { x: cx - 4, y: cy + 3 };          // Midfielder (high)
+  players[4].position = { x: cx + 6, y: cy + 5 };          // Attacker (high)
 
   // Team 2 (right side, attacks left)
-  players[4].position = { x: CONFIG.pitch.width - 1, y: cy };
-  players[4].goalLine = CONFIG.pitch.width;
-  players[5].position = { x: cx + 8, y: cy + 4 };          // Defender (low)
-  players[6].position = { x: cx + 3, y: cy };              // Midfielder (center)
-  players[7].position = { x: cx - 5, y: cy - 4 };          // Attacker (high)
+  players[5].position = { x: CONFIG.pitch.width - 1, y: cy };
+  players[5].goalLine = CONFIG.pitch.width;
+  players[6].position = { x: cx + 10, y: cy + 5 };         // Defender (high)
+  players[7].position = { x: cx + 4, y: cy + 3 };          // Midfielder (high)
+  players[8].position = { x: cx + 4, y: cy - 3 };          // Midfielder (low)
+  players[9].position = { x: cx - 6, y: cy - 5 };          // Attacker (low)
 }
 
 setInitialPositions();
@@ -83,7 +87,7 @@ function updateCanvasSize() {
   
   const label = pitch.name || 'Pitch';
   document.getElementById('fieldInfo').textContent =
-    `${label} · ${pitch.width}×${pitch.height} m · 4v4+GK`;
+    `${label} · ${pitch.width}×${pitch.height} m · 5v5+GK`;
 }
 
 function loop() {

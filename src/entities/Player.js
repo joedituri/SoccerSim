@@ -51,10 +51,13 @@ export class Player {
     
     this.isGoalkeeper = (role === 'goalkeeper');
     if (this.isGoalkeeper) {
-      this.influenceRadius = 1.2;
+      this.influenceRadius = 0.3;
       this.holdingBall = false;
       this.holdTime = 0;
       this.goalLine = null;
+      this.isDiving = false;
+      this.diveTime = 0;
+      this.diveDirection = 0;
     }
     
     this.isAI = true;
@@ -71,6 +74,36 @@ export class Player {
     this.speedMultiplier = 1;
 
     this._ballCarrierTime = 0;
+
+    // Reaction time - perceived ball lags behind real ball
+    this.reactionTime = 0.1; // seconds
+    this.perceivedBall = {
+      position: { x: 0, y: 0 },
+      velocity: { x: 0, y: 0 },
+      initialized: false
+    };
+  }
+
+  /** Update perceived ball position with reaction delay */
+  updatePerceivedBall(ball, dt) {
+    if (!this.perceivedBall.initialized) {
+      // First frame: sync to real ball
+      this.perceivedBall.position.x = ball.position.x;
+      this.perceivedBall.position.y = ball.position.y;
+      this.perceivedBall.velocity.x = ball.velocity.x;
+      this.perceivedBall.velocity.y = ball.velocity.y;
+      this.perceivedBall.initialized = true;
+      return;
+    }
+
+    // Exponential decay toward real ball position
+    // Higher reactionTime = slower catch-up = more delay
+    const catchUpRate = dt / (dt + this.reactionTime);
+
+    this.perceivedBall.position.x += (ball.position.x - this.perceivedBall.position.x) * catchUpRate;
+    this.perceivedBall.position.y += (ball.position.y - this.perceivedBall.position.y) * catchUpRate;
+    this.perceivedBall.velocity.x += (ball.velocity.x - this.perceivedBall.velocity.x) * catchUpRate;
+    this.perceivedBall.velocity.y += (ball.velocity.y - this.perceivedBall.velocity.y) * catchUpRate;
   }
 
   /** Unit vector for movement direction; safe when velocity is near zero. */
@@ -105,8 +138,23 @@ export class Player {
 
     if (this.kickCooldown > 0) this.kickCooldown -= dt;
 
+    // Update perceived ball with reaction delay
+    this.updatePerceivedBall(ball, dt);
+
+    // Create perceived ball view for AI decisions
+    const perceivedBall = {
+      position: this.perceivedBall.position,
+      velocity: this.perceivedBall.velocity,
+      spin: ball.spin,
+      isAirborne: ball.isAirborne,
+      height: ball.height,
+      heldBy: ball.heldBy,
+      radius: ball.radius,
+      getSpeed: () => Math.sqrt(this.perceivedBall.velocity.x ** 2 + this.perceivedBall.velocity.y ** 2)
+    };
+
     if (this.isGoalkeeper) {
-      this.goalkeeperAI(ball, pitch, dt);
+      this.goalkeeperAI(ball, pitch, dt); // GK uses perceived for tracking, real for catching
       return;
     }
 
@@ -119,31 +167,34 @@ export class Player {
     const gkWithBall = allPlayers.find(p => p.isGoalkeeper && p.holdingBall);
     if (gkWithBall) {
       if (gkWithBall.team !== this.team) {
-        this.applyOutfieldPositioning(ball, pitch, allPlayers);
+        this.applyOutfieldPositioning(perceivedBall, pitch, allPlayers, ball);
         return;
       }
       if (!this.isGoalkeeper) {
-        this.applyOutfieldPositioning(ball, pitch, allPlayers);
+        this.applyOutfieldPositioning(perceivedBall, pitch, allPlayers, ball);
         return;
       }
     }
 
+    // Use real ball for influence check (actual touching)
     if (this.isInfluencingBall(ball)) {
-      this.handleBallCarrier(ball, pitch, dt, allPlayers);
+      this.handleBallCarrier(ball, pitch, dt, allPlayers); // Real ball for kicking
       return;
     }
 
     this._ballCarrierTime = 0;
-    this.applyOutfieldPositioning(ball, pitch, allPlayers);
+    this.applyOutfieldPositioning(perceivedBall, pitch, allPlayers, ball);
   }
 
-  applyOutfieldPositioning(ball, pitch, allPlayers) {
+  applyOutfieldPositioning(perceivedBall, pitch, allPlayers, realBall) {
     const centerX = pitch.width / 2;
     const centerY = pitch.height / 2;
     const AI = CONFIG.ai;
-    const possessor = getBallPossessor(ball, allPlayers);
+    // Use real ball for possession check (who actually has it)
+    const possessor = getBallPossessor(realBall || perceivedBall, allPlayers);
     const myGoalX = this.team === 'team1' ? 0 : pitch.width;
 
+    // Chaser determination uses perceived ball (who should chase)
     let team1Chaser = null;
     let team2Chaser = null;
     let minDist1 = Infinity;
@@ -151,7 +202,7 @@ export class Player {
 
     allPlayers.forEach(p => {
       if (p.isGoalkeeper) return;
-      const d = p.distanceTo(ball.position);
+      const d = p.distanceTo(perceivedBall.position);
       if (p.team === 'team1' && d < minDist1) {
         minDist1 = d;
         team1Chaser = p;
@@ -225,21 +276,21 @@ export class Player {
         this.role === 'attacker' ? 5 : this.role === 'defender' ? 2.5 : 3.5;
       const lane = (this.id % 3) - 1;
       targetX =
-        ball.position.x +
+        perceivedBall.position.x +
         ad * AI.supportAhead * ahead;
-      targetY = ball.position.y + lane * wide;
+      targetY = perceivedBall.position.y + lane * wide;
       targetY = Math.max(1.2, Math.min(pitch.height - 1.2, targetY));
       targetX = Math.max(1.2, Math.min(pitch.width - 1.2, targetX));
       speed = 5.2;
     } else if (oppHasBall && !isChaser) {
       const b = AI.defendGoalBlend;
-      targetX = ball.position.x * (1 - b) + myGoalX * b;
-      targetY = ball.position.y * 0.62 + centerY * 0.38;
+      targetX = perceivedBall.position.x * (1 - b) + myGoalX * b;
+      targetY = perceivedBall.position.y * 0.62 + centerY * 0.38;
       targetY = Math.max(1, Math.min(pitch.height - 1, targetY));
       speed = 3.8;
     } else if (chaseBall) {
-      targetX = ball.position.x;
-      targetY = ball.position.y;
+      targetX = perceivedBall.position.x;
+      targetY = perceivedBall.position.y;
       speed = oppHasBall ? 5.6 : 5;
     } else {
       if (this.role === 'defender') {
@@ -443,16 +494,26 @@ export class Player {
       return;
     }
 
-    // Track ball on goal line
+    // Handle dive animation - can't move while diving
+    if (this.isDiving) {
+      this.diveTime -= dt;
+      if (this.diveTime <= 0) {
+        this.isDiving = false;
+        this.diveDirection = 0;
+      }
+      return; // Frozen during dive
+    }
+
+    // Track perceived ball position on goal line (reaction delay)
     const targetX = goalX + (this.team === 'team1' ? 0.5 : -0.5);
-    const targetY = Math.max(goalY - goalWidth/2 + 0.5, Math.min(goalY + goalWidth/2 - 0.5, ball.position.y));
+    const targetY = Math.max(goalY - goalWidth/2 + 0.5, Math.min(goalY + goalWidth/2 - 0.5, this.perceivedBall.position.y));
 
     const dx = targetX - this.position.x;
     const dy = targetY - this.position.y;
     const dist = Math.sqrt(dx * dx + dy * dy);
 
     if (dist > 0.2) {
-      const speed = 4;
+      const speed = 1; // Nerfed from 4
       this.velocity.x = (dx / dist) * speed;
       this.velocity.y = (dy / dist) * speed;
     } else {
@@ -460,19 +521,51 @@ export class Player {
       this.velocity.y = 0;
     }
 
-    // Try to catch if ball close and fast (only if not on cooldown from recent clear)
+    // Use REAL ball for catching/clearing (actual physics)
     const ballDist = this.distanceTo(ball.position);
     const inGoalWidth = ball.position.y > goalY - goalWidth && ball.position.y < goalY + goalWidth;
 
-    if (ballDist < 1.2 && ball.getSpeed() > 5 && inGoalWidth && this.kickCooldown <= 0) {
-      this.catchBall(ball);
-      return;
+    // Catch attempt with success probability
+    if (ballDist < this.influenceRadius + ball.radius && ball.getSpeed() > 3 && inGoalWidth && this.kickCooldown <= 0) {
+      // Catch success probability based on ball speed and direction
+      const catchChance = this.calculateCatchChance(ball, goalY, goalWidth);
+      if (Math.random() < catchChance) {
+        this.catchBall(ball);
+        return;
+      } else {
+        // Failed catch - dive and miss, longer cooldown
+        this.isDiving = true;
+        this.diveTime = 0.5;
+        this.diveDirection = ball.position.y > goalY ? 1 : -1;
+        this.kickCooldown = 1.0;
+        return;
+      }
     }
 
     // Kick the ball away if close (even if slow) - clearance!
     if (ballDist < this.influenceRadius && this.kickCooldown <= 0 && !ball.heldBy) {
       this.clearBall(ball, pitch);
     }
+  }
+
+  calculateCatchChance(ball, goalY, goalWidth) {
+    // Base catch chance
+    let chance = 0.7;
+
+    // Harder to catch fast balls
+    const speed = ball.getSpeed();
+    if (speed > 15) chance -= 0.3;
+    else if (speed > 10) chance -= 0.15;
+
+    // Harder to catch balls at edges of goal
+    const ballYOffset = Math.abs(ball.position.y - goalY);
+    const edgeFactor = ballYOffset / (goalWidth / 2);
+    chance -= edgeFactor * 0.2;
+
+    // Harder to catch airborne balls
+    if (ball.isAirborne) chance -= 0.15;
+
+    return Math.max(0.2, Math.min(0.95, chance));
   }
 
   clearBall(ball, pitch) {
@@ -488,7 +581,7 @@ export class Player {
     ball.velocity.y = sideBias * power * 0.6;
     ball.spin = (Math.random() - 0.5) * 6;
 
-    this.kickCooldown = 0.4;
+    this.kickCooldown = 1.2; // Increased from 0.4
   }
   
   catchBall(ball) {

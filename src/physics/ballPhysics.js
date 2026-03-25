@@ -90,19 +90,31 @@ export class BallPhysics {
 
   handlePitchBoundaries(ball) {
     const { width, height } = CONFIG.pitch;
+    const goalWidth = CONFIG.pitch.goalWidth || 3;
     const radius = ball.radius;
     const restitution = CONFIG.physics.ball.restitution;
+    const goalY = (height - goalWidth) / 2;
 
+    // Left/right boundaries with goal opening
     if (ball.position.x - radius < 0) {
-      ball.position.x = radius;
-      ball.velocity.x *= -restitution;
-      ball.spin *= 0.5;
+      // Check if ball is in goal area
+      if (ball.position.y < goalY || ball.position.y > goalY + goalWidth) {
+        ball.position.x = radius;
+        ball.velocity.x *= -restitution;
+        ball.spin *= 0.5;
+      }
+      // else: ball is in goal opening, let it through for goal check
     } else if (ball.position.x + radius > width) {
-      ball.position.x = width - radius;
-      ball.velocity.x *= -restitution;
-      ball.spin *= 0.5;
+      // Check if ball is in goal area
+      if (ball.position.y < goalY || ball.position.y > goalY + goalWidth) {
+        ball.position.x = width - radius;
+        ball.velocity.x *= -restitution;
+        ball.spin *= 0.5;
+      }
+      // else: ball is in goal opening, let it through for goal check
     }
 
+    // Top/bottom boundaries (no openings)
     if (ball.position.y - radius < 0) {
       ball.position.y = radius;
       ball.velocity.y *= -restitution;
@@ -116,14 +128,20 @@ export class BallPhysics {
 
   handleSoftBoundaries(ball) {
     const { width, height } = CONFIG.pitch;
+    const goalWidth = CONFIG.pitch.goalWidth || 3;
     const radius = ball.radius;
+    const goalY = (height - goalWidth) / 2;
 
     if (ball.position.x - radius < 0) {
-      ball.position.x = radius;
-      ball.velocity.x *= -0.5;
+      if (ball.position.y < goalY || ball.position.y > goalY + goalWidth) {
+        ball.position.x = radius;
+        ball.velocity.x *= -0.5;
+      }
     } else if (ball.position.x + radius > width) {
-      ball.position.x = width - radius;
-      ball.velocity.x *= -0.5;
+      if (ball.position.y < goalY || ball.position.y > goalY + goalWidth) {
+        ball.position.x = width - radius;
+        ball.velocity.x *= -0.5;
+      }
     }
 
     if (ball.position.y - radius < 0) {
