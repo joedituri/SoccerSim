@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SoccerSim</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      background: #1a1a1a;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      min-height: 100vh;
+      font-family: monospace;
+      color: #fff;
+      padding: 10px;
+    }
+    h1 { font-size: 14px; margin-bottom: 8px; color: #888; }
+    
+    .top-bar {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 8px;
+      align-items: center;
+    }
+    .field-btn {
+      padding: 6px 12px;
+      font-size: 11px;
+      font-family: monospace;
+      background: #333;
+      color: #888;
+      border: 2px solid #444;
+      border-radius: 5px;
+      cursor: pointer;
+    }
+    .field-btn.active {
+      background: #2d5016;
+      color: #fff;
+      border-color: #4a7c23;
+    }
+    .field-info { font-size: 10px; color: #666; }
+    
+    canvas {
+      border: 2px solid #444;
+      display: block;
+      max-width: 100%;
+    }
+    
+    .stats {
+      margin-top: 10px;
+      font-size: 10px;
+      color: #666;
+      display: flex;
+      gap: 20px;
+    }
+  </style>
+</head>
+<body>
+  <h1>⚽ SoccerSim</h1>
+  
+  <div class="top-bar">
+    <button id="btn5v5" class="field-btn active">Small pitch</button>
+    <button id="btn11v11" class="field-btn">Full pitch</button>
+    <span class="field-info" id="fieldInfo">Small pitch · 40×25 m · 3v3+GK</span>
+  </div>
+  
+  <canvas id="gameCanvas" width="600" height="375"></canvas>
+  
+  <div class="stats">
+    <span id="scoreDisplay">RED 0 - 0 BLUE</span>
+    <span id="timeDisplay">0:00</span>
+  </div>
+  
+  <script type="module" src="src/main.js?v=15"></script>
+</body>
+</html>
