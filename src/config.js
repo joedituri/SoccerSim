@@ -61,7 +61,7 @@ export const CONFIG = {
     passPowerMax: 22,
     shootRangeBase: 17,
     dribbleSpeed: 4.2,
-    supportAhead: 7,
+    supportAhead: 10,
     defendGoalBlend: 0.55,
   },
 

@@ -267,19 +267,16 @@ export class Player {
       } else {
         targetX = this.team === 'team1' ? centerX - 3 : centerX + 3;
       }
-      // Spread into open space rather than clustering at center
-      const wide = this.role === 'defender' ? 3 : 4.5;
-      targetY = this._bestOpenY(targetX, centerY, wide, pitch, allPlayers);
+      // Spread across full pitch height to find open space
+      targetY = this._bestOpenY(targetX, centerY, centerY - 1.2, pitch, allPlayers);
       speed = 2;
     } else if (mateHasBall) {
       const ad = attackDir(this.team);
       const ahead = this.role === 'attacker' ? 1.15 : this.role === 'defender' ? 0.55 : 0.85;
-      const wide =
-        this.role === 'attacker' ? 5 : this.role === 'defender' ? 2.5 : 3.5;
       targetX = perceivedBall.position.x + ad * AI.supportAhead * ahead;
       targetX = Math.max(1.2, Math.min(pitch.width - 1.2, targetX));
-      // Find the Y position most open from opponents within role-appropriate spread
-      targetY = this._bestOpenY(targetX, perceivedBall.position.y, wide, pitch, allPlayers);
+      // Sample full pitch height so players spread across the whole field
+      targetY = this._bestOpenY(targetX, centerY, centerY - 1.2, pitch, allPlayers);
       speed = 5.2;
     } else if (oppHasBall && !isChaser) {
       const b = AI.defendGoalBlend;
