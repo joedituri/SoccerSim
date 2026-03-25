@@ -33,6 +33,21 @@ const players = [
   new Player(9, 'team2', 'attacker'),
 ];
 
+// Formation slots (formationDepth: 0=own goal, 1=opponent goal; formationY: 0=top, 1=bottom)
+function applyFormationSlots() {
+  players[1].formationDepth = 0.18; players[1].formationY = 0.38; // team1 DEF
+  players[2].formationDepth = 0.42; players[2].formationY = 0.32; // team1 MID-top
+  players[3].formationDepth = 0.42; players[3].formationY = 0.68; // team1 MID-bottom
+  players[4].formationDepth = 0.72; players[4].formationY = 0.50; // team1 ATT
+
+  players[6].formationDepth = 0.18; players[6].formationY = 0.62; // team2 DEF
+  players[7].formationDepth = 0.42; players[7].formationY = 0.68; // team2 MID-bottom
+  players[8].formationDepth = 0.42; players[8].formationY = 0.32; // team2 MID-top
+  players[9].formationDepth = 0.72; players[9].formationY = 0.50; // team2 ATT
+}
+
+applyFormationSlots();
+
 let score = { team1: 0, team2: 0 };
 
 /** Wall-clock goal celebration (ms); sim pauses while active */
@@ -393,7 +408,9 @@ function setField(type) {
       p.holdTime = 0;
     }
   });
-  
+
+  applyFormationSlots();
+
   players[4].goalLine = CONFIG.pitch.width;
   
   setTimeout(() => ball.kick((Math.random() - 0.5) * 10, (Math.random() - 0.5) * 10, 10), 300);

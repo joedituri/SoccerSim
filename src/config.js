@@ -63,6 +63,9 @@ export const CONFIG = {
     dribbleSpeed: 4.2,
     supportAhead: 10,
     defendGoalBlend: 0.55,
+    formationBallShift: 0.3,  // how much the team's line shifts with ball X (0=none, 1=full)
+    markingGoalSide: 0.4,     // how far goal-side to position when marking (0=on opp, 1=goal line)
+    markingBlend: 0.5,        // blend between marking target and goal-protection formula
   },
 
   // Rendering

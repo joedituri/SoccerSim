@@ -84,6 +84,50 @@ export class Player {
     };
   }
 
+  /**
+   * Compute this player's dynamic home position based on formation slot and ball location.
+   * The whole team's line shifts forward/backward with the ball by formationBallShift.
+   */
+  getHomePosition(ball, pitch) {
+    if (this.formationDepth === undefined) {
+      return { x: pitch.width / 2, y: pitch.height / 2 };
+    }
+    const myGoalX = this.team === 'team1' ? 0 : pitch.width;
+    const oppGoalX = this.team === 'team1' ? pitch.width : 0;
+    const centerX = pitch.width / 2;
+    // team1 attacks +X so shifts positively when ball is right of centre; team2 inverse
+    const dirSign = this.team === 'team1' ? 1 : -1;
+
+    const baseX = myGoalX + (oppGoalX - myGoalX) * this.formationDepth;
+    const shift = (ball.position.x - centerX) * CONFIG.ai.formationBallShift * dirSign;
+    const homeX = Math.max(1.2, Math.min(pitch.width - 1.2, baseX + shift));
+    const homeY = Math.max(1.2, Math.min(pitch.height - 1.2,
+      (this.formationY ?? 0.5) * pitch.height));
+
+    return { x: homeX, y: homeY };
+  }
+
+  /**
+   * Zone-based marking: find the opponent nearest to this player's HOME position
+   * (not current position), so each player is responsible for opponents in their zone.
+   * Returns the opponent's position to mark goal-side of.
+   */
+  _findMarkTarget(allPlayers, home) {
+    let closest = null;
+    let closestDist = Infinity;
+    for (const p of allPlayers) {
+      if (p.team === this.team || p.isGoalkeeper) continue;
+      const dx = home.x - p.position.x;
+      const dy = home.y - p.position.y;
+      const d = Math.sqrt(dx * dx + dy * dy);
+      if (d < closestDist) {
+        closestDist = d;
+        closest = p;
+      }
+    }
+    return closest ? closest.position : home;
+  }
+
   /** Update perceived ball position with reaction delay */
   updatePerceivedBall(ball, dt) {
     if (!this.perceivedBall.initialized) {
@@ -271,30 +315,35 @@ export class Player {
       targetY = this._bestOpenY(targetX, centerY, centerY - 1.2, pitch, allPlayers);
       speed = 2;
     } else if (mateHasBall) {
-      const ad = attackDir(this.team);
-      const ahead = this.role === 'attacker' ? 1.15 : this.role === 'defender' ? 0.55 : 0.85;
-      targetX = perceivedBall.position.x + ad * AI.supportAhead * ahead;
-      targetX = Math.max(1.2, Math.min(pitch.width - 1.2, targetX));
-      // Sample full pitch height so players spread across the whole field
-      targetY = this._bestOpenY(targetX, centerY, centerY - 1.2, pitch, allPlayers);
+      // Move to formation home position, find best open Y in that zone
+      const home = this.getHomePosition(perceivedBall, pitch);
+      targetX = home.x;
+      targetY = this._bestOpenY(targetX, home.y, centerY - 1.2, pitch, allPlayers);
       speed = 5.2;
     } else if (oppHasBall && !isChaser) {
+      // Light marking: zone-based assignment, position goal-side of marked opponent
+      const home = this.getHomePosition(perceivedBall, pitch);
+      const markPos = this._findMarkTarget(allPlayers, home);
+      const markX = markPos.x + (myGoalX - markPos.x) * AI.markingGoalSide;
+      const markY = Math.max(1, Math.min(pitch.height - 1, markPos.y));
+      // Blend marking with goal-protection formula for defensive shape
       const b = AI.defendGoalBlend;
-      targetX = perceivedBall.position.x * (1 - b) + myGoalX * b;
-      targetY = perceivedBall.position.y * 0.62 + centerY * 0.38;
-      targetY = Math.max(1, Math.min(pitch.height - 1, targetY));
+      const defendX = perceivedBall.position.x * (1 - b) + myGoalX * b;
+      const defendY = Math.max(1, Math.min(pitch.height - 1,
+        perceivedBall.position.y * 0.62 + centerY * 0.38));
+      const bm = AI.markingBlend;
+      targetX = markX * bm + defendX * (1 - bm);
+      targetY = markY * bm + defendY * (1 - bm);
       speed = 3.8;
     } else if (chaseBall) {
       targetX = perceivedBall.position.x;
       targetY = perceivedBall.position.y;
       speed = oppHasBall ? 5.6 : 5;
     } else {
-      if (this.role === 'defender') {
-        targetX = this.team === 'team1' ? centerX - 8 : centerX + 8;
-      } else {
-        targetX = this.team === 'team1' ? centerX - 3 : centerX + 3;
-      }
-      targetY = centerY;
+      // Idle / loose ball non-chaser: return to formation home position
+      const home = this.getHomePosition(perceivedBall, pitch);
+      targetX = home.x;
+      targetY = home.y;
       speed = 2;
     }
 
