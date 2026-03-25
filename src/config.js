@@ -61,7 +61,7 @@ export const CONFIG = {
     passPowerMax: 22,
     shootRangeBase: 17,
     dribbleSpeed: 4.2,
-    supportAhead: 10,
+    supportAhead: 18,
     defendGoalBlend: 0.55,
     formationBallShift: 0.3,  // how much the team's line shifts with ball X (0=none, 1=full)
     markingGoalSide: 0.4,     // how far goal-side to position when marking (0=on opp, 1=goal line)
@@ -77,5 +77,5 @@ export const CONFIG = {
   },
 };
 
-// Initialize with 5v5
-CONFIG.pitch = CONFIG.pitches['5v5'];
+// Initialize with 11v11
+CONFIG.pitch = CONFIG.pitches['11v11'];

@@ -19,31 +19,61 @@ const collisionSystem = new CollisionSystem();
 
 const ball = new Ball(CONFIG.pitch.width / 2, CONFIG.pitch.height / 2);
 
-// Create players - 5v5 (GK + 4 outfield per team)
+// 22 players — 11 per team, 4-3-3 formation
+// Team 1 (Red): ids 0-10   Team 2 (Blue): ids 11-21
 const players = [
-  new Player(0, 'team1', 'goalkeeper'),
-  new Player(1, 'team1', 'defender'),
-  new Player(2, 'team1', 'midfielder'),
-  new Player(3, 'team1', 'midfielder'),
-  new Player(4, 'team1', 'attacker'),
-  new Player(5, 'team2', 'goalkeeper'),
-  new Player(6, 'team2', 'defender'),
-  new Player(7, 'team2', 'midfielder'),
-  new Player(8, 'team2', 'midfielder'),
-  new Player(9, 'team2', 'attacker'),
+  // Team 1 (Red)
+  new Player(0,  'team1', 'goalkeeper'),
+  new Player(1,  'team1', 'defender'),   // LB
+  new Player(2,  'team1', 'defender'),   // CB-L
+  new Player(3,  'team1', 'defender'),   // CB-R
+  new Player(4,  'team1', 'defender'),   // RB
+  new Player(5,  'team1', 'midfielder'), // DM
+  new Player(6,  'team1', 'midfielder'), // CM-L
+  new Player(7,  'team1', 'midfielder'), // CM-R
+  new Player(8,  'team1', 'attacker'),   // LW
+  new Player(9,  'team1', 'attacker'),   // ST
+  new Player(10, 'team1', 'attacker'),   // RW
+  // Team 2 (Blue)
+  new Player(11, 'team2', 'goalkeeper'),
+  new Player(12, 'team2', 'defender'),   // LB
+  new Player(13, 'team2', 'defender'),   // CB-L
+  new Player(14, 'team2', 'defender'),   // CB-R
+  new Player(15, 'team2', 'defender'),   // RB
+  new Player(16, 'team2', 'midfielder'), // DM
+  new Player(17, 'team2', 'midfielder'), // CM-L
+  new Player(18, 'team2', 'midfielder'), // CM-R
+  new Player(19, 'team2', 'attacker'),   // LW
+  new Player(20, 'team2', 'attacker'),   // ST
+  new Player(21, 'team2', 'attacker'),   // RW
 ];
 
 // Formation slots (formationDepth: 0=own goal, 1=opponent goal; formationY: 0=top, 1=bottom)
+// 4-3-3: 4 DEF · 3 MID · 3 ATT
 function applyFormationSlots() {
-  players[1].formationDepth = 0.18; players[1].formationY = 0.38; // team1 DEF
-  players[2].formationDepth = 0.42; players[2].formationY = 0.32; // team1 MID-top
-  players[3].formationDepth = 0.42; players[3].formationY = 0.68; // team1 MID-bottom
-  players[4].formationDepth = 0.72; players[4].formationY = 0.50; // team1 ATT
+  // Team 1 (Red)
+  players[1].formationDepth  = 0.18; players[1].formationY  = 0.15; // LB
+  players[2].formationDepth  = 0.20; players[2].formationY  = 0.36; // CB-L
+  players[3].formationDepth  = 0.20; players[3].formationY  = 0.64; // CB-R
+  players[4].formationDepth  = 0.18; players[4].formationY  = 0.85; // RB
+  players[5].formationDepth  = 0.38; players[5].formationY  = 0.50; // DM
+  players[6].formationDepth  = 0.48; players[6].formationY  = 0.30; // CM-L
+  players[7].formationDepth  = 0.48; players[7].formationY  = 0.70; // CM-R
+  players[8].formationDepth  = 0.72; players[8].formationY  = 0.12; // LW
+  players[9].formationDepth  = 0.78; players[9].formationY  = 0.50; // ST
+  players[10].formationDepth = 0.72; players[10].formationY = 0.88; // RW
 
-  players[6].formationDepth = 0.18; players[6].formationY = 0.62; // team2 DEF
-  players[7].formationDepth = 0.42; players[7].formationY = 0.68; // team2 MID-bottom
-  players[8].formationDepth = 0.42; players[8].formationY = 0.32; // team2 MID-top
-  players[9].formationDepth = 0.72; players[9].formationY = 0.50; // team2 ATT
+  // Team 2 (Blue) — Y positions mirrored so teams fill different channels
+  players[12].formationDepth = 0.18; players[12].formationY = 0.85; // LB
+  players[13].formationDepth = 0.20; players[13].formationY = 0.64; // CB-L
+  players[14].formationDepth = 0.20; players[14].formationY = 0.36; // CB-R
+  players[15].formationDepth = 0.18; players[15].formationY = 0.15; // RB
+  players[16].formationDepth = 0.38; players[16].formationY = 0.50; // DM
+  players[17].formationDepth = 0.48; players[17].formationY = 0.70; // CM-L
+  players[18].formationDepth = 0.48; players[18].formationY = 0.30; // CM-R
+  players[19].formationDepth = 0.72; players[19].formationY = 0.88; // LW
+  players[20].formationDepth = 0.78; players[20].formationY = 0.50; // ST
+  players[21].formationDepth = 0.72; players[21].formationY = 0.12; // RW
 }
 
 applyFormationSlots();
@@ -54,24 +84,70 @@ let score = { team1: 0, team2: 0 };
 let goalFlashUntil = 0;
 let goalFlashTeam = null;
 
-// Set initial positions
-function setInitialPositions() {
-  const cx = CONFIG.pitch.width / 2;
-  const cy = CONFIG.pitch.height / 2;
-  // Team 1 Red (right side, attacks left toward x=0)
-  players[0].position = { x: CONFIG.pitch.width - 1, y: cy };   // GK
-  players[1].position = { x: cx + 10, y: cy - 5 };              // Defender
-  players[2].position = { x: cx + 4, y: cy - 3 };               // Midfielder
-  players[3].position = { x: cx + 4, y: cy + 3 };               // Midfielder
-  players[4].position = { x: cx - 6, y: cy + 5 };               // Attacker
+// Which player ids are active for each field mode
+const ACTIVE_IDS = {
+  '11v11': new Set([0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21]),
+  '5v5':   new Set([0,2,5,7,9, 11,13,16,18,20]), // GK + 1 CB + DM + CM + ST per team
+};
 
-  // Team 2 Blue (left side, attacks right toward x=pitch.width)
-  players[5].position = { x: 1, y: cy };
-  players[5].goalLine = 0;
-  players[6].position = { x: cx - 10, y: cy + 5 };              // Defender
-  players[7].position = { x: cx - 4, y: cy + 3 };               // Midfielder
-  players[8].position = { x: cx - 4, y: cy - 3 };               // Midfielder
-  players[9].position = { x: cx + 6, y: cy - 5 };               // Attacker
+function setInitialPositions() {
+  const { pitch } = CONFIG;
+  const cx = pitch.width / 2;
+  const cy = pitch.height / 2;
+  const is11 = pitch.width > 60;
+
+  // Activate / deactivate players based on field mode
+  const activeSet = is11 ? ACTIVE_IDS['11v11'] : ACTIVE_IDS['5v5'];
+  players.forEach(p => {
+    p.active = activeSet.has(p.id);
+    if (!p.active) {
+      p.position = { x: -999, y: -999 };
+      p.velocity = { x: 0, y: 0 };
+    }
+  });
+
+  if (is11) {
+    // ── Team 1 Red (right half, attacks left) ──────────────────────────────
+    players[0].position  = { x: pitch.width - 1, y: cy };        // GK
+    players[1].position  = { x: cx + 26, y: cy - 24 };           // LB
+    players[2].position  = { x: cx + 28, y: cy - 9  };           // CB-L
+    players[3].position  = { x: cx + 28, y: cy + 9  };           // CB-R
+    players[4].position  = { x: cx + 26, y: cy + 24 };           // RB
+    players[5].position  = { x: cx + 17, y: cy      };           // DM
+    players[6].position  = { x: cx + 12, y: cy - 12 };           // CM-L
+    players[7].position  = { x: cx + 12, y: cy + 12 };           // CM-R
+    players[8].position  = { x: cx +  4, y: cy - 22 };           // LW
+    players[9].position  = { x: cx +  3, y: cy      };           // ST
+    players[10].position = { x: cx +  4, y: cy + 22 };           // RW
+
+    // ── Team 2 Blue (left half, attacks right) ────────────────────────────
+    players[11].position = { x: 1,        y: cy      };           // GK
+    players[12].position = { x: cx - 26,  y: cy + 24 };          // LB
+    players[13].position = { x: cx - 28,  y: cy + 9  };          // CB-L
+    players[14].position = { x: cx - 28,  y: cy - 9  };          // CB-R
+    players[15].position = { x: cx - 26,  y: cy - 24 };          // RB
+    players[16].position = { x: cx - 17,  y: cy      };          // DM
+    players[17].position = { x: cx - 12,  y: cy + 12 };          // CM-L
+    players[18].position = { x: cx - 12,  y: cy - 12 };          // CM-R
+    players[19].position = { x: cx -  4,  y: cy + 22 };          // LW
+    players[20].position = { x: cx -  3,  y: cy      };          // ST
+    players[21].position = { x: cx -  4,  y: cy - 22 };          // RW
+  } else {
+    // ── 5v5 on small pitch (40×25) ────────────────────────────────────────
+    // Team 1 Red (right half): GK + CB-L + DM + CM-R + ST
+    players[0].position  = { x: pitch.width - 1, y: cy     };    // GK
+    players[2].position  = { x: cx + 8,          y: cy - 3 };    // CB
+    players[5].position  = { x: cx + 3,          y: cy - 4 };    // DM
+    players[7].position  = { x: cx + 3,          y: cy + 4 };    // CM
+    players[9].position  = { x: cx - 4,          y: cy + 3 };    // ST
+
+    // Team 2 Blue (left half): GK + CB-L + DM + CM-R + ST
+    players[11].position = { x: 1,               y: cy     };    // GK
+    players[13].position = { x: cx - 8,          y: cy + 3 };    // CB
+    players[16].position = { x: cx - 3,          y: cy + 4 };    // DM
+    players[18].position = { x: cx - 3,          y: cy - 4 };    // CM
+    players[20].position = { x: cx + 4,          y: cy - 3 };    // ST
+  }
 }
 
 setInitialPositions();
@@ -84,25 +160,30 @@ let timeAccumulator = 0;
 let lastFrameTime = performance.now();
 let gameTime = 0;
 
+function getActivePlayers() {
+  return players.filter(p => p.active);
+}
+
 function updateCanvasSize() {
   const { pitch } = CONFIG;
   const maxWidth = Math.min(window.innerWidth - 20, 700);
   const maxHeight = Math.min(window.innerHeight * 0.6, 450);
-  
+
   const totalWidth = pitch.width + (pitch.goalDepth || 1) * 2;
   const totalHeight = pitch.height;
-  
+
   ppm = Math.min(15, maxWidth / totalWidth, maxHeight / totalHeight);
   ppm = Math.max(5, ppm);
-  
-  canvas.width = Math.ceil(totalWidth * ppm);
+
+  canvas.width  = Math.ceil(totalWidth  * ppm);
   canvas.height = Math.ceil(totalHeight * ppm);
-  
+
   offsetX = (pitch.goalDepth || 1) * ppm;
-  
+
   const label = pitch.name || 'Pitch';
+  const mode  = pitch.width > 60 ? '11v11+GK' : '5v5+GK';
   document.getElementById('fieldInfo').textContent =
-    `${label} · ${pitch.width}×${pitch.height} m · 5v5+GK`;
+    `${label} · ${pitch.width}×${pitch.height} m · ${mode}`;
 }
 
 function loop() {
@@ -132,13 +213,11 @@ function loop() {
       const dt = deltaTimeMs / 1000;
       gameTime += dt;
 
-      players.forEach(p => {
-        p.updateAI(ball, CONFIG.pitch, gameTime, dt, players);
-      });
-
-      players.forEach(p => playerPhysics.update(p, dt));
+      const active = getActivePlayers();
+      active.forEach(p => p.updateAI(ball, CONFIG.pitch, gameTime, dt, active));
+      active.forEach(p => playerPhysics.update(p, dt));
       ballPhysics.update(ball, dt);
-      collisionSystem.update(ball, players, dt);
+      collisionSystem.update(ball, active, dt);
 
       checkGoals();
 
@@ -180,9 +259,9 @@ function resetAfterGoal() {
   ball.isAirborne = false;
   ball.height = 0;
   ball.heldBy = null;
-  
+
   setInitialPositions();
-  
+
   setTimeout(() => {
     ball.kick((Math.random() - 0.5) * 10, (Math.random() - 0.5) * 10, 10);
   }, 500);
@@ -203,7 +282,7 @@ function render() {
   ctx.translate(offsetX, offsetY);
 
   drawPitch();
-  players.forEach(p => drawPlayer(p));
+  getActivePlayers().forEach(p => drawPlayer(p));
   drawBall();
 
   ctx.restore();
@@ -267,7 +346,6 @@ function drawGoals() {
   ctx.strokeStyle = '#FFFFFF';
   ctx.lineWidth = 3;
 
-  // Left goal
   ctx.beginPath();
   ctx.moveTo(0, goalY * ppm);
   ctx.lineTo(-goalDepth * ppm, goalY * ppm);
@@ -275,7 +353,6 @@ function drawGoals() {
   ctx.lineTo(0, (goalY + goalWidth) * ppm);
   ctx.stroke();
 
-  // Right goal
   ctx.beginPath();
   ctx.moveTo(pitch.width * ppm, goalY * ppm);
   ctx.lineTo((pitch.width + goalDepth) * ppm, goalY * ppm);
@@ -288,27 +365,28 @@ function drawBall() {
   const ballX = ball.position.x * ppm;
   const ballY = (ball.position.y - ball.height) * ppm;
   const ballRadius = Math.max(3, ball.radius * ppm);
-  
+
   if (ball.height > 0) {
     ctx.fillStyle = 'rgba(0,0,0,0.3)';
     ctx.beginPath();
-    ctx.ellipse(ball.position.x * ppm, ball.position.y * ppm + ball.height * ppm * 2, ballRadius * (1 + ball.height * 0.5), ballRadius * 0.5 * (1 + ball.height * 0.5), 0, 0, Math.PI * 2);
+    ctx.ellipse(ball.position.x * ppm, ball.position.y * ppm + ball.height * ppm * 2,
+      ballRadius * (1 + ball.height * 0.5), ballRadius * 0.5 * (1 + ball.height * 0.5), 0, 0, Math.PI * 2);
     ctx.fill();
   }
 
   ctx.save();
   ctx.translate(ballX, ballY);
   ctx.rotate(ball.rotation);
-  
+
   ctx.fillStyle = '#FFFFFF';
   ctx.beginPath();
   ctx.arc(0, 0, ballRadius, 0, Math.PI * 2);
   ctx.fill();
-  
+
   ctx.strokeStyle = '#333333';
   ctx.lineWidth = 1;
   ctx.stroke();
-  
+
   ctx.fillStyle = '#1a1a1a';
   ctx.beginPath();
   for (let i = 0; i < 5; i++) {
@@ -320,7 +398,7 @@ function drawBall() {
   }
   ctx.closePath();
   ctx.fill();
-  
+
   ctx.restore();
 }
 
@@ -330,17 +408,17 @@ function drawPlayer(p) {
   ctx.beginPath();
   ctx.arc(p.position.x * ppm, p.position.y * ppm, p.radius * ppm, 0, Math.PI * 2);
   ctx.fill();
-  
+
   if (p.isGoalkeeper) {
     ctx.strokeStyle = '#00FF00';
     ctx.lineWidth = 3;
     ctx.stroke();
-    
+
     ctx.fillStyle = '#00FF00';
     ctx.font = 'bold 10px monospace';
     ctx.textAlign = 'center';
     ctx.fillText('GK', p.position.x * ppm, (p.position.y - p.radius - 0.6) * ppm);
-    
+
     if (p.holdingBall) {
       ctx.fillStyle = '#FF6600';
       ctx.beginPath();
@@ -356,17 +434,18 @@ function drawPlayer(p) {
   ctx.lineWidth = 2;
   ctx.beginPath();
   ctx.moveTo(p.position.x * ppm, p.position.y * ppm);
-  ctx.lineTo((p.position.x + Math.cos(p.angle) * p.radius * 1.2) * ppm, (p.position.y + Math.sin(p.angle) * p.radius * 1.2) * ppm);
+  ctx.lineTo((p.position.x + Math.cos(p.angle) * p.radius * 1.2) * ppm,
+             (p.position.y + Math.sin(p.angle) * p.radius * 1.2) * ppm);
   ctx.stroke();
 
   if (!p.isGoalkeeper) {
     const barWidth = p.radius * 2 * ppm;
     const barX = (p.position.x - p.radius) * ppm;
     const barY = (p.position.y - p.radius - 0.4) * ppm;
-    
+
     ctx.fillStyle = 'rgba(0,0,0,0.4)';
     ctx.fillRect(barX, barY, barWidth, 4);
-    
+
     ctx.fillStyle = p.stamina > 30 ? '#00FF00' : '#FF0000';
     ctx.fillRect(barX, barY, barWidth * (p.stamina / p.staminaMax), 4);
   }
@@ -389,30 +468,29 @@ function setField(type) {
   document.getElementById('btn5v5').classList.toggle('active', type === '5v5');
   document.getElementById('btn11v11').classList.toggle('active', type === '11v11');
   updateCanvasSize();
-  
+
   ball.position = { x: CONFIG.pitch.width / 2, y: CONFIG.pitch.height / 2 };
   ball.velocity = { x: 0, y: 0 };
   ball.spin = 0;
   ball.isAirborne = false;
   ball.height = 0;
   ball.heldBy = null;
-  
-  setInitialPositions();
-  
+
   players.forEach(p => {
-    p.velocity = { x: 0, y: 0 };
-    p.stamina = p.staminaMax;
-    p.targetGoal = null;
+    p.velocity    = { x: 0, y: 0 };
+    p.stamina     = p.staminaMax;
+    p.targetGoal  = null;
+    p._ballCarrierTime = 0;
     if (p.isGoalkeeper) {
       p.holdingBall = false;
-      p.holdTime = 0;
+      p.holdTime    = 0;
+      p.isDiving    = false;
     }
   });
 
   applyFormationSlots();
+  setInitialPositions();
 
-  players[4].goalLine = CONFIG.pitch.width;
-  
   setTimeout(() => ball.kick((Math.random() - 0.5) * 10, (Math.random() - 0.5) * 10, 10), 300);
 }
 
