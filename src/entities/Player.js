@@ -92,11 +92,11 @@ export class Player {
     if (this.formationDepth === undefined) {
       return { x: pitch.width / 2, y: pitch.height / 2 };
     }
-    const myGoalX = this.team === 'team1' ? 0 : pitch.width;
-    const oppGoalX = this.team === 'team1' ? pitch.width : 0;
+    const myGoalX = this.team === 'team1' ? pitch.width : 0;
+    const oppGoalX = this.team === 'team1' ? 0 : pitch.width;
     const centerX = pitch.width / 2;
-    // team1 attacks +X so shifts positively when ball is right of centre; team2 inverse
-    const dirSign = this.team === 'team1' ? 1 : -1;
+    // dirSign=1 works for both teams: ball deviation naturally aligns with attack direction
+    const dirSign = 1;
 
     const baseX = myGoalX + (oppGoalX - myGoalX) * this.formationDepth;
     const shift = (ball.position.x - centerX) * CONFIG.ai.formationBallShift * dirSign;
@@ -236,7 +236,7 @@ export class Player {
     const AI = CONFIG.ai;
     // Use real ball for possession check (who actually has it)
     const possessor = getBallPossessor(realBall || perceivedBall, allPlayers);
-    const myGoalX = this.team === 'team1' ? 0 : pitch.width;
+    const myGoalX = this.team === 'team1' ? pitch.width : 0;
 
     // Chaser determination uses perceived ball (who should chase)
     let team1Chaser = null;
@@ -298,18 +298,19 @@ export class Player {
     let speed;
 
     if (gkHoldingBall && gkHoldingBall.team !== this.team) {
+      // Retreat into own half (team1 is on right, team2 on left)
       if (this.team === 'team1') {
-        targetX = Math.min(centerX - 2, this.position.x - 2);
-      } else {
         targetX = Math.max(centerX + 2, this.position.x + 2);
+      } else {
+        targetX = Math.min(centerX - 2, this.position.x - 2);
       }
       targetY = centerY;
       speed = 3;
     } else if (gkHoldingBall && gkHoldingBall.team === this.team) {
       if (this.role === 'defender') {
-        targetX = this.team === 'team1' ? centerX - 8 : centerX + 8;
+        targetX = this.team === 'team1' ? centerX + 8 : centerX - 8;
       } else {
-        targetX = this.team === 'team1' ? centerX - 3 : centerX + 3;
+        targetX = this.team === 'team1' ? centerX + 3 : centerX - 3;
       }
       // Spread across full pitch height to find open space
       targetY = this._bestOpenY(targetX, centerY, centerY - 1.2, pitch, allPlayers);
@@ -571,7 +572,7 @@ export class Player {
   }
   
   goalkeeperAI(ball, pitch, dt) {
-    const goalX = this.team === 'team1' ? 0 : pitch.width;
+    const goalX = this.team === 'team1' ? pitch.width : 0;
     const goalY = pitch.height / 2;
     const goalWidth = pitch.goalWidth || 3;
 
@@ -595,7 +596,7 @@ export class Player {
     }
 
     // Track perceived ball position on goal line (reaction delay)
-    const targetX = goalX + (this.team === 'team1' ? 0.5 : -0.5);
+    const targetX = goalX + (this.team === 'team1' ? -0.5 : 0.5);
     const targetY = Math.max(goalY - goalWidth/2 + 0.5, Math.min(goalY + goalWidth/2 - 0.5, this.perceivedBall.position.y));
 
     const dx = targetX - this.position.x;
@@ -660,7 +661,7 @@ export class Player {
 
   clearBall(ball, pitch) {
     // Kick the ball away from goal
-    const kickDir = this.team === 'team1' ? 1 : -1; // Kick towards opponent's goal
+    const kickDir = this.team === 'team1' ? -1 : 1; // Kick towards opponent's goal
     const power = 12 + Math.random() * 6;
 
     // Aim towards the side with more space
@@ -685,7 +686,7 @@ export class Player {
   }
   
   throwBall(ball, pitch) {
-    const targetX = this.team === 'team1' ? pitch.width * 0.6 : pitch.width * 0.4;
+    const targetX = this.team === 'team1' ? pitch.width * 0.4 : pitch.width * 0.6;
     const targetY = pitch.height * (0.3 + Math.random() * 0.4);
     
     const dx = targetX - this.position.x;

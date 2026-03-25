@@ -58,20 +58,20 @@ let goalFlashTeam = null;
 function setInitialPositions() {
   const cx = CONFIG.pitch.width / 2;
   const cy = CONFIG.pitch.height / 2;
-  // Team 1 (left side, attacks right)
-  players[0].position = { x: 1, y: cy };                    // GK
-  players[1].position = { x: cx - 10, y: cy - 5 };         // Defender (low)
-  players[2].position = { x: cx - 4, y: cy - 3 };          // Midfielder (low)
-  players[3].position = { x: cx - 4, y: cy + 3 };          // Midfielder (high)
-  players[4].position = { x: cx + 6, y: cy + 5 };          // Attacker (high)
+  // Team 1 Red (right side, attacks left toward x=0)
+  players[0].position = { x: CONFIG.pitch.width - 1, y: cy };   // GK
+  players[1].position = { x: cx + 10, y: cy - 5 };              // Defender
+  players[2].position = { x: cx + 4, y: cy - 3 };               // Midfielder
+  players[3].position = { x: cx + 4, y: cy + 3 };               // Midfielder
+  players[4].position = { x: cx - 6, y: cy + 5 };               // Attacker
 
-  // Team 2 (right side, attacks left)
-  players[5].position = { x: CONFIG.pitch.width - 1, y: cy };
-  players[5].goalLine = CONFIG.pitch.width;
-  players[6].position = { x: cx + 10, y: cy + 5 };         // Defender (high)
-  players[7].position = { x: cx + 4, y: cy + 3 };          // Midfielder (high)
-  players[8].position = { x: cx + 4, y: cy - 3 };          // Midfielder (low)
-  players[9].position = { x: cx - 6, y: cy - 5 };          // Attacker (low)
+  // Team 2 Blue (left side, attacks right toward x=pitch.width)
+  players[5].position = { x: 1, y: cy };
+  players[5].goalLine = 0;
+  players[6].position = { x: cx - 10, y: cy + 5 };              // Defender
+  players[7].position = { x: cx - 4, y: cy + 3 };               // Midfielder
+  players[8].position = { x: cx - 4, y: cy - 3 };               // Midfielder
+  players[9].position = { x: cx + 6, y: cy - 5 };               // Attacker
 }
 
 setInitialPositions();
@@ -160,15 +160,15 @@ function checkGoals() {
   const goalY = (CONFIG.pitch.height - goalWidth) / 2;
 
   if (ball.position.x < 0 && ball.position.y > goalY && ball.position.y < goalY + goalWidth) {
-    score.team2++;
-    goalFlashTeam = 'team2';
+    score.team1++;
+    goalFlashTeam = 'team1';
     goalFlashUntil = performance.now() + 1200;
     return;
   }
 
   if (ball.position.x > CONFIG.pitch.width && ball.position.y > goalY && ball.position.y < goalY + goalWidth) {
-    score.team1++;
-    goalFlashTeam = 'team1';
+    score.team2++;
+    goalFlashTeam = 'team2';
     goalFlashUntil = performance.now() + 1200;
   }
 }
