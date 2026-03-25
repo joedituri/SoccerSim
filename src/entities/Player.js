@@ -441,14 +441,14 @@ export class Player {
     const passInfo = this.pickBestPassTarget(ball, pitch, allPlayers);
 
     const urgentPass =
-      pressure < AI.pressureRadius * 0.85 && passInfo && passInfo.score > -0.15;
-    const goodPass = passInfo && passInfo.score > 1.0;
-    const longHold = this._ballCarrierTime > 2.4;
+      pressure < AI.pressureRadius * 0.85 && passInfo && passInfo.score > 1.5;
+    const goodPass = passInfo && passInfo.score > 3.5;
+    const longHold = this._ballCarrierTime > 4.0;
 
     if (
       this.kickCooldown <= 0 &&
       passInfo &&
-      (goodPass || longHold || (urgentPass && passInfo.score > 0.2))
+      (goodPass || longHold || (urgentPass && passInfo.score > 1.5))
     ) {
       const pwr = Math.min(
         AI.passPowerMax,
