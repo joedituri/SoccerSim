@@ -19,14 +19,16 @@ const collisionSystem = new CollisionSystem();
 
 const ball = new Ball(CONFIG.pitch.width / 2, CONFIG.pitch.height / 2);
 
-// Create players - 3v3 (GK + 2 outfield per team)
+// Create players - 4v4 (GK + 3 outfield per team)
 const players = [
   new Player(0, 'team1', 'goalkeeper'),
   new Player(1, 'team1', 'defender'),
-  new Player(2, 'team1', 'attacker'),
-  new Player(3, 'team2', 'goalkeeper'),
-  new Player(4, 'team2', 'defender'),
-  new Player(5, 'team2', 'attacker'),
+  new Player(2, 'team1', 'midfielder'),
+  new Player(3, 'team1', 'attacker'),
+  new Player(4, 'team2', 'goalkeeper'),
+  new Player(5, 'team2', 'defender'),
+  new Player(6, 'team2', 'midfielder'),
+  new Player(7, 'team2', 'attacker'),
 ];
 
 let score = { team1: 0, team2: 0 };
@@ -39,16 +41,18 @@ let goalFlashTeam = null;
 function setInitialPositions() {
   const cx = CONFIG.pitch.width / 2;
   const cy = CONFIG.pitch.height / 2;
-  // Team 1 (left side)
-  players[0].position = { x: 1, y: cy };
-  players[1].position = { x: cx - 8, y: cy };
-  players[2].position = { x: cx + 3, y: cy };
+  // Team 1 (left side, attacks right)
+  players[0].position = { x: 1, y: cy };                    // GK
+  players[1].position = { x: cx - 8, y: cy - 4 };          // Defender (low)
+  players[2].position = { x: cx - 3, y: cy };              // Midfielder (center)
+  players[3].position = { x: cx + 5, y: cy + 4 };          // Attacker (high)
 
-  // Team 2 (right side)
-  players[3].position = { x: CONFIG.pitch.width - 1, y: cy };
-  players[3].goalLine = CONFIG.pitch.width;
-  players[4].position = { x: cx + 8, y: cy };
-  players[5].position = { x: cx - 3, y: cy };
+  // Team 2 (right side, attacks left)
+  players[4].position = { x: CONFIG.pitch.width - 1, y: cy };
+  players[4].goalLine = CONFIG.pitch.width;
+  players[5].position = { x: cx + 8, y: cy + 4 };          // Defender (low)
+  players[6].position = { x: cx + 3, y: cy };              // Midfielder (center)
+  players[7].position = { x: cx - 5, y: cy - 4 };          // Attacker (high)
 }
 
 setInitialPositions();
@@ -79,7 +83,7 @@ function updateCanvasSize() {
   
   const label = pitch.name || 'Pitch';
   document.getElementById('fieldInfo').textContent =
-    `${label} · ${pitch.width}×${pitch.height} m · 3v3+GK`;
+    `${label} · ${pitch.width}×${pitch.height} m · 4v4+GK`;
 }
 
 function loop() {
