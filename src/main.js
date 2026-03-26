@@ -252,6 +252,21 @@ function checkGoals() {
   }
 }
 
+/**
+ * Update each outfield player's mentalityShift based on current scoreline.
+ * Losing team pushes formation higher; winning team sits deeper.
+ */
+function updateMentality() {
+  players.forEach(p => {
+    if (p.isGoalkeeper || p.formationDepth === undefined) return;
+    const diff = p.team === 'team1'
+      ? score.team1 - score.team2
+      : score.team2 - score.team1;
+    // Losing by N goals → shift up to +0.12 (push forward); winning → up to -0.12 (sit deep)
+    p.mentalityShift = Math.max(-0.12, Math.min(0.12, -diff * 0.06));
+  });
+}
+
 function resetAfterGoal() {
   ball.position = { x: CONFIG.pitch.width / 2, y: CONFIG.pitch.height / 2 };
   ball.velocity = { x: 0, y: 0 };
@@ -260,6 +275,7 @@ function resetAfterGoal() {
   ball.height = 0;
   ball.heldBy = null;
 
+  updateMentality();
   setInitialPositions();
 
   setTimeout(() => {
