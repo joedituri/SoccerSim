@@ -404,10 +404,13 @@ function drawBall() {
 
 function drawPlayer(p) {
   const color = p.team === 'team1' ? '#FF4444' : '#4444FF';
-  ctx.fillStyle = color;
   ctx.beginPath();
   ctx.arc(p.position.x * ppm, p.position.y * ppm, p.radius * ppm, 0, Math.PI * 2);
+  ctx.fillStyle = color;
   ctx.fill();
+  ctx.strokeStyle = '#FFFFFF';
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
 
   if (p.isGoalkeeper) {
     ctx.strokeStyle = '#00FF00';
