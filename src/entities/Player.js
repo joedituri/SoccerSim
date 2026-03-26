@@ -43,7 +43,9 @@ export class Player {
     this.angle = 0;
 
     this.radius = 0.3;
-    this.maxSpeed = 8;
+    // Role-based top speeds (m/s): attackers fastest, GK slowest
+    const maxSpeedByRole = { goalkeeper: 7.0, defender: 8.2, midfielder: 8.6, attacker: 9.2 };
+    this.maxSpeed = maxSpeedByRole[role] ?? 8.0;
     this.maxAccel = 15;
     
     this.influenceRadius = 0.7;

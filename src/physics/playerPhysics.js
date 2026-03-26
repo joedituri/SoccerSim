@@ -18,12 +18,22 @@ export class PlayerPhysics {
   }
 
   processMovement(player, dt) {
-    // AI players set velocity directly in their AI, but apply friction
+    // AI players set velocity directly in their AI, but apply friction and stamina cap
     if (player.isAI) {
-      // Apply friction to AI velocity
-      const friction = 3; // m/s²
+      // Stamina reduces top speed: 100% stamina = full speed, 0% = 70% speed
+      const staminaFactor = 0.7 + (player.stamina / player.staminaMax) * 0.3;
+      const maxEffective = player.maxSpeed * staminaFactor;
       const speed = player.getSpeed();
+
+      if (speed > maxEffective) {
+        const scale = maxEffective / speed;
+        player.velocity.x *= scale;
+        player.velocity.y *= scale;
+      }
+
+      // Apply friction
       if (speed > 0.1) {
+        const friction = 3; // m/s²
         const decel = friction * dt;
         const newSpeed = Math.max(0, speed - decel);
         if (newSpeed > 0) {
