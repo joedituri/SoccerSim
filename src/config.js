@@ -23,10 +23,10 @@ export const CONFIG = {
       width: 105,       // FIFA standard
       height: 68,       // FIFA standard
       centerSpotRadius: 0.915,  // 3ft in meters
-      goalAreaWidth: 18.32,     // 6-yard box (6 yards = 5.5m each side)
-      goalAreaHeight: 5.5,
-      penaltyAreaWidth: 40.32,  // 18-yard box (18 yards = 16.5m each side)
-      penaltyAreaHeight: 16.5,
+      goalAreaWidth: 5.5,       // 6-yard box depth (6 yards into pitch)
+      goalAreaHeight: 18.32,    // 6-yard box width along goal line
+      penaltyAreaWidth: 16.5,   // 18-yard box depth (18 yards into pitch)
+      penaltyAreaHeight: 40.32, // 18-yard box width along goal line
       penaltySpotDistance: 11,  // 12 yards = 11m
       goalWidth: 7.32,  // 8 yards
       goalDepth: 2,
