@@ -438,18 +438,6 @@ function drawPlayer(p) {
              (p.position.y + Math.sin(p.angle) * p.radius * 1.2) * ppm);
   ctx.stroke();
 
-  if (!p.isGoalkeeper) {
-    const barWidth = p.radius * 2 * ppm;
-    const barX = (p.position.x - p.radius) * ppm;
-    const barY = (p.position.y - p.radius - 0.4) * ppm;
-
-    ctx.fillStyle = 'rgba(0,0,0,0.4)';
-    ctx.fillRect(barX, barY, barWidth, 4);
-
-    ctx.fillStyle = p.stamina > 30 ? '#00FF00' : '#FF0000';
-    ctx.fillRect(barX, barY, barWidth * (p.stamina / p.staminaMax), 4);
-  }
-
   if (p.isSprinting) {
     ctx.strokeStyle = '#FFD700';
     ctx.lineWidth = 3;
