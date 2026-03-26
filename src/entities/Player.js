@@ -76,6 +76,8 @@ export class Player {
     this.speedMultiplier = 1;
 
     this._ballCarrierTime = 0;
+    this._isRunningBehind = false;
+    this.mentalityShift = 0; // positive = push up, negative = sit deeper (set by game-state logic)
 
     // Reaction time - perceived ball lags behind real ball
     this.reactionTime = 0.1; // seconds
@@ -100,7 +102,8 @@ export class Player {
     // dirSign=1 works for both teams: ball deviation naturally aligns with attack direction
     const dirSign = 1;
 
-    const baseX = myGoalX + (oppGoalX - myGoalX) * this.formationDepth;
+    const depth = Math.max(0.05, Math.min(0.95, this.formationDepth + (this.mentalityShift ?? 0)));
+    const baseX = myGoalX + (oppGoalX - myGoalX) * depth;
     const shift = (ball.position.x - centerX) * CONFIG.ai.formationBallShift * dirSign;
     const homeX = Math.max(1.2, Math.min(pitch.width - 1.2, baseX + shift));
     const homeY = Math.max(1.2, Math.min(pitch.height - 1.2,
@@ -200,7 +203,7 @@ export class Player {
     };
 
     if (this.isGoalkeeper) {
-      this.goalkeeperAI(ball, pitch, dt); // GK uses perceived for tracking, real for catching
+      this.goalkeeperAI(ball, pitch, dt, allPlayers); // GK uses perceived for tracking, real for catching
       return;
     }
 
@@ -233,6 +236,7 @@ export class Player {
   }
 
   applyOutfieldPositioning(perceivedBall, pitch, allPlayers, realBall) {
+    this._isRunningBehind = false; // reset each frame; set true only in run-behind branch
     const centerX = pitch.width / 2;
     const centerY = pitch.height / 2;
     const AI = CONFIG.ai;
@@ -318,11 +322,34 @@ export class Player {
       targetY = this._bestOpenY(targetX, centerY, centerY - 1.2, pitch, allPlayers);
       speed = 2;
     } else if (mateHasBall) {
-      // Move to formation home position, find best open Y in that zone
       const home = this.getHomePosition(perceivedBall, pitch);
-      targetX = home.x;
-      targetY = this._bestOpenY(targetX, home.y, centerY - 1.2, pitch, allPlayers);
-      speed = 5.2;
+      const ad = attackDir(this.team);
+      // Attackers make runs in behind the defensive line when ball is past midfield
+      if (this.role === 'attacker' && ad * (perceivedBall.position.x - pitch.width / 2) > 5) {
+        // Find the shallowest opposition defender (closest to our attack target)
+        let defLineX = ad === -1 ? 0 : pitch.width;
+        for (const p of allPlayers) {
+          if (p.team === this.team || p.isGoalkeeper) continue;
+          if (ad === -1 && p.position.x > defLineX) defLineX = p.position.x;
+          if (ad ===  1 && p.position.x < defLineX) defLineX = p.position.x;
+        }
+        // Target 6m beyond the defensive line in the attack direction
+        const runX = Math.max(2, Math.min(pitch.width - 2, defLineX + ad * 6));
+        if (ad * (runX - perceivedBall.position.x) > 3) {
+          targetX = runX;
+          targetY = this._bestOpenY(runX, home.y, centerY - 1.2, pitch, allPlayers);
+          speed = this.maxSpeed * 0.95;
+          this._isRunningBehind = true;
+        } else {
+          targetX = home.x;
+          targetY = this._bestOpenY(home.x, home.y, centerY - 1.2, pitch, allPlayers);
+          speed = 5.2;
+        }
+      } else {
+        targetX = home.x;
+        targetY = this._bestOpenY(home.x, home.y, centerY - 1.2, pitch, allPlayers);
+        speed = 5.2;
+      }
     } else if (oppHasBall && !isChaser) {
       // Light marking: zone-based assignment, position goal-side of marked opponent
       const home = this.getHomePosition(perceivedBall, pitch);
@@ -337,6 +364,10 @@ export class Player {
       const bm = AI.markingBlend;
       targetX = markX * bm + defendX * (1 - bm);
       targetY = markY * bm + defendY * (1 - bm);
+      // Coordinated defensive line: all defenders share the same X to avoid gaps
+      if (this.role === 'defender') {
+        targetX = this._defensiveLineX(perceivedBall, pitch, allPlayers);
+      }
       speed = 3.8;
     } else if (chaseBall) {
       targetX = perceivedBall.position.x;
@@ -409,6 +440,17 @@ export class Player {
     }
 
     return bestY;
+  }
+
+  /** Average home-position X of all same-team defenders — keeps the line coordinated. */
+  _defensiveLineX(ball, pitch, allPlayers) {
+    let sumX = 0, count = 0;
+    for (const p of allPlayers) {
+      if (p.team !== this.team || p.role !== 'defender' || p.isGoalkeeper) continue;
+      sumX += p.getHomePosition(ball, pitch).x;
+      count++;
+    }
+    return count > 0 ? sumX / count : this.getHomePosition(ball, pitch).x;
   }
 
   _openSideBias(allPlayers) {
@@ -508,6 +550,49 @@ export class Player {
       return;
     }
 
+    // Through ball to an attacker making a run in behind the defense
+    if (this.kickCooldown <= 0) {
+      const runner = allPlayers.find(p =>
+        p !== this && p.team === this.team && p._isRunningBehind && !p.isGoalkeeper
+      );
+      if (runner) {
+        const lx = runner.position.x - ball.position.x;
+        const ly = runner.position.y - ball.position.y;
+        const llen2 = lx * lx + ly * ly;
+        let laneBlocked = false;
+        if (llen2 > 4) {
+          for (const opp of allPlayers) {
+            if (opp.team === this.team) continue;
+            const t = Math.max(0, Math.min(1,
+              ((opp.position.x - ball.position.x) * lx + (opp.position.y - ball.position.y) * ly) / llen2
+            ));
+            const nearX = ball.position.x + t * lx;
+            const nearY = ball.position.y + t * ly;
+            if ((opp.position.x - nearX) ** 2 + (opp.position.y - nearY) ** 2 < 6.25) {
+              laneBlocked = true; break;
+            }
+          }
+        }
+        if (!laneBlocked) {
+          const leadTime = Math.sqrt(llen2) / 18;
+          const leadX = Math.max(1, Math.min(pitch.width - 1, runner.position.x + runner.velocity.x * leadTime));
+          const leadY = Math.max(1, Math.min(pitch.height - 1, runner.position.y + runner.velocity.y * leadTime));
+          const tdx = leadX - ball.position.x;
+          const tdy = leadY - ball.position.y;
+          const tdist = Math.sqrt(tdx * tdx + tdy * tdy);
+          if (tdist > 2) {
+            const power = Math.min(AI.passPowerMax, Math.max(AI.passPowerMin, tdist * 0.65));
+            ball.velocity.x = (tdx / tdist) * power;
+            ball.velocity.y = (tdy / tdist) * power;
+            ball.spin = (Math.random() - 0.5) * 4;
+            this.kickCooldown = 0.4;
+            this._ballCarrierTime = 0;
+            return;
+          }
+        }
+      }
+    }
+
     const goalX = this.targetGoal.x;
     const goalY = this.targetGoal.y;
     const dx = goalX - this.position.x;
@@ -573,7 +658,7 @@ export class Player {
     this.kickCooldown = 0.5;
   }
   
-  goalkeeperAI(ball, pitch, dt) {
+  goalkeeperAI(ball, pitch, dt, allPlayers = []) {
     const goalX = this.team === 'team1' ? pitch.width : 0;
     const goalY = pitch.height / 2;
     const goalWidth = pitch.goalWidth || 3;
@@ -582,7 +667,7 @@ export class Player {
     if (this.holdingBall) {
       this.holdTime += dt;
       if (this.holdTime > 1.0) {
-        this.throwBall(ball, pitch);
+        this.throwBall(ball, pitch, allPlayers);
       }
       return;
     }
@@ -687,20 +772,46 @@ export class Player {
     ball.heldBy = this;
   }
   
-  throwBall(ball, pitch) {
-    const targetX = this.team === 'team1' ? pitch.width * 0.4 : pitch.width * 0.6;
-    const targetY = pitch.height * (0.3 + Math.random() * 0.4);
-    
+  throwBall(ball, pitch, allPlayers = []) {
+    const ad = attackDir(this.team);
+    // Smart distribution: score each teammate by openness + forward progress
+    let bestTarget = null;
+    let bestScore = -Infinity;
+    for (const p of allPlayers) {
+      if (p.team !== this.team || p.isGoalkeeper) continue;
+      const dist = this.distanceTo(p.position);
+      if (dist < 2 || dist > 55) continue;
+      // How much pressure is on this teammate?
+      let minOppDist = Infinity;
+      for (const opp of allPlayers) {
+        if (opp.team === this.team) continue;
+        const d = opp.distanceTo(p.position);
+        if (d < minOppDist) minOppDist = d;
+      }
+      const forward = ad * (p.position.x - this.position.x);
+      // Prefer open teammates; a little weight on forward progress; slight discount for distance
+      const score = minOppDist * 1.2 + forward * 0.4 - dist * 0.05 + Math.random() * 0.5;
+      if (score > bestScore) { bestScore = score; bestTarget = p; }
+    }
+
+    let targetX, targetY;
+    if (bestTarget && bestScore > 2) {
+      targetX = bestTarget.position.x;
+      targetY = bestTarget.position.y;
+    } else {
+      // Fallback: kick into open space in the opponent's half
+      targetX = this.team === 'team1' ? pitch.width * 0.4 : pitch.width * 0.6;
+      targetY = pitch.height * (0.3 + Math.random() * 0.4);
+    }
+
     const dx = targetX - this.position.x;
     const dy = targetY - this.position.y;
     const dist = Math.sqrt(dx * dx + dy * dy);
-    
-    const power = 15 + Math.random() * 8;
-    
+    const power = Math.min(22, Math.max(10, dist * 0.55 + 5));
+
     ball.velocity.x = (dx / dist) * power;
     ball.velocity.y = (dy / dist) * power;
     ball.heldBy = null;
-    
     this.holdingBall = false;
     this.holdTime = 0;
     this.kickCooldown = 0.3;

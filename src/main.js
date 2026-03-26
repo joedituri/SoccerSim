@@ -166,8 +166,8 @@ function getActivePlayers() {
 
 function updateCanvasSize() {
   const { pitch } = CONFIG;
-  const maxWidth = Math.min(window.innerWidth - 20, 700);
-  const maxHeight = Math.min(window.innerHeight * 0.6, 450);
+  const maxWidth = Math.min(window.innerWidth - 20, 1000);
+  const maxHeight = Math.min(window.innerHeight * 0.75, 650);
 
   const totalWidth = pitch.width + (pitch.goalDepth || 1) * 2;
   const totalHeight = pitch.height;
@@ -252,6 +252,21 @@ function checkGoals() {
   }
 }
 
+/**
+ * Update each outfield player's mentalityShift based on current scoreline.
+ * Losing team pushes formation higher; winning team sits deeper.
+ */
+function updateMentality() {
+  players.forEach(p => {
+    if (p.isGoalkeeper || p.formationDepth === undefined) return;
+    const diff = p.team === 'team1'
+      ? score.team1 - score.team2
+      : score.team2 - score.team1;
+    // Losing by N goals → shift up to +0.12 (push forward); winning → up to -0.12 (sit deep)
+    p.mentalityShift = Math.max(-0.12, Math.min(0.12, -diff * 0.06));
+  });
+}
+
 function resetAfterGoal() {
   ball.position = { x: CONFIG.pitch.width / 2, y: CONFIG.pitch.height / 2 };
   ball.velocity = { x: 0, y: 0 };
@@ -260,6 +275,7 @@ function resetAfterGoal() {
   ball.height = 0;
   ball.heldBy = null;
 
+  updateMentality();
   setInitialPositions();
 
   setTimeout(() => {
@@ -404,8 +420,9 @@ function drawBall() {
 
 function drawPlayer(p) {
   const color = p.team === 'team1' ? '#FF4444' : '#4444FF';
+  const drawRadius = Math.max(5, p.radius * ppm);
   ctx.beginPath();
-  ctx.arc(p.position.x * ppm, p.position.y * ppm, p.radius * ppm, 0, Math.PI * 2);
+  ctx.arc(p.position.x * ppm, p.position.y * ppm, drawRadius, 0, Math.PI * 2);
   ctx.fillStyle = color;
   ctx.fill();
   ctx.strokeStyle = '#FFFFFF';
@@ -420,7 +437,7 @@ function drawPlayer(p) {
     ctx.fillStyle = '#00FF00';
     ctx.font = 'bold 10px monospace';
     ctx.textAlign = 'center';
-    ctx.fillText('GK', p.position.x * ppm, (p.position.y - p.radius - 0.6) * ppm);
+    ctx.fillText('GK', p.position.x * ppm, p.position.y * ppm - drawRadius - 4);
 
     if (p.holdingBall) {
       ctx.fillStyle = '#FF6600';
@@ -437,15 +454,15 @@ function drawPlayer(p) {
   ctx.lineWidth = 2;
   ctx.beginPath();
   ctx.moveTo(p.position.x * ppm, p.position.y * ppm);
-  ctx.lineTo((p.position.x + Math.cos(p.angle) * p.radius * 1.2) * ppm,
-             (p.position.y + Math.sin(p.angle) * p.radius * 1.2) * ppm);
+  ctx.lineTo(p.position.x * ppm + Math.cos(p.angle) * drawRadius * 1.2,
+             p.position.y * ppm + Math.sin(p.angle) * drawRadius * 1.2);
   ctx.stroke();
 
   if (p.isSprinting) {
     ctx.strokeStyle = '#FFD700';
     ctx.lineWidth = 3;
     ctx.beginPath();
-    ctx.arc(p.position.x * ppm, p.position.y * ppm, p.radius * ppm + 4, 0, Math.PI * 2);
+    ctx.arc(p.position.x * ppm, p.position.y * ppm, drawRadius + 4, 0, Math.PI * 2);
     ctx.stroke();
   }
 }
