@@ -808,8 +808,9 @@ export class Player {
     }
 
     this.kickCooldown = 0.5;
+    this._ballCarrierTime = 0;
   }
-  
+
   goalkeeperAI(ball, pitch, dt, allPlayers = []) {
     const goalX = this.team === 'team1' ? pitch.width : 0;
     const goalY = pitch.height / 2;
@@ -959,6 +960,19 @@ export class Player {
     const dx = targetX - this.position.x;
     const dy = targetY - this.position.y;
     const dist = Math.sqrt(dx * dx + dy * dy);
+
+    if (dist < 0.1) {
+      // Target too close – punt in a safe default direction
+      const fallbackDir = this.team === 'team1' ? -1 : 1;
+      ball.velocity.x = fallbackDir * 12;
+      ball.velocity.y = (Math.random() - 0.5) * 6;
+      ball.heldBy = null;
+      this.holdingBall = false;
+      this.holdTime = 0;
+      this.kickCooldown = 0.3;
+      return;
+    }
+
     const power = Math.min(22, Math.max(10, dist * 0.55 + 5));
 
     ball.velocity.x = (dx / dist) * power;

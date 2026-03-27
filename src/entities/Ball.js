@@ -38,9 +38,21 @@ export class Ball {
   // Apply impulse (kick) - speeds in m/s
   // Higher speed = more likely to become airborne
   kick(vx, vy, spin = 0) {
+    // Clamp velocity to prevent numerical instability
+    const maxSpeed = 30; // m/s – hard upper bound
+    const rawSpeed = Math.sqrt(vx * vx + vy * vy);
+    if (rawSpeed > maxSpeed) {
+      const scale = maxSpeed / rawSpeed;
+      vx *= scale;
+      vy *= scale;
+    }
+
     this.velocity.x = vx;
     this.velocity.y = vy;
-    this.spin = spin;
+
+    // Clamp spin to configured maximum
+    const maxSpin = CONFIG.physics.ball.maxSpin;
+    this.spin = Math.max(-maxSpin, Math.min(maxSpin, spin));
 
     // Determine if airborne based on kick speed
     const speed = this.getSpeed();
