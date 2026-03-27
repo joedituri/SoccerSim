@@ -1,5 +1,6 @@
 // Player entity (metric units) - Passing, support, defense
 import { CONFIG } from '../config.js';
+import { findPassTargets, isLaneClear, predictReceivingPosition, oneTwoViable } from '../ai/PassingAI.js';
 
 function attackDir(team) {
   return team === 'team1' ? -1 : 1;
@@ -78,6 +79,9 @@ export class Player {
     this._ballCarrierTime = 0;
     this._isRunningBehind = false;
     this.mentalityShift = 0; // positive = push up, negative = sit deeper (set by game-state logic)
+    this._passTargetOptions = []; // top pass targets for rendering
+    this._lastPassTo = null;    // teammate we just passed to (for one-two tracking)
+    this._oneTwoActive = false; // true if we're doing a one-two run
 
     // Reaction time - perceived ball lags behind real ball
     this.reactionTime = 0.1; // seconds
@@ -266,6 +270,28 @@ export class Player {
     const gkHoldingBall = allPlayers.find(p => p.isGoalkeeper && p.holdingBall);
     const isChaser = this === team1Chaser || this === team2Chaser;
 
+    // Proximity override: if ball is loose and VERY close to a non-chaser, they also react
+    const ballIsLoose = !possessor;
+    const myDistToBall = this.distanceTo(perceivedBall.position);
+    const proximityTrigger = ballIsLoose && !isChaser && myDistToBall < 6; // 6m trigger radius
+    if (proximityTrigger) {
+      // Sprint toward predicted ball position
+      const ballSpeed = Math.sqrt(perceivedBall.velocity.x ** 2 + perceivedBall.velocity.y ** 2);
+      const lookAhead = Math.min(1.0, myDistToBall / 5);
+      const targetX = Math.max(0.5, Math.min(pitch.width - 0.5, perceivedBall.position.x + perceivedBall.velocity.x * lookAhead));
+      const targetY = Math.max(0.5, Math.min(pitch.height - 0.5, perceivedBall.position.y + perceivedBall.velocity.y * lookAhead));
+      const urgency = Math.max(0.3, 1 - myDistToBall / 6);
+      const speed = this.maxSpeed * (0.5 + urgency * 0.5);
+      const dx = targetX - this.position.x;
+      const dy = targetY - this.position.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist > 0.3) {
+        this.velocity.x = (dx / dist) * speed;
+        this.velocity.y = (dy / dist) * speed;
+      }
+      return; // Skip rest of positioning
+    }
+
     const mateHasBall =
       possessor && possessor.team === this.team && possessor !== this;
     const oppHasBall =
@@ -312,6 +338,28 @@ export class Player {
       }
       targetY = centerY;
       speed = 3;
+    } else if (this._oneTwoActive && this._oneTwoTarget) {
+      // One-two: sprint back toward the ball carrier to offer return pass
+      const tc = this._oneTwoTarget;
+      // Run to a point between where ball is and where we're going
+      // (offer a pass on our forward half, not behind us)
+      const ad = attackDir(this.team);
+      const midX = (ball.position.x + tc.position.x) / 2;
+      const midY = (ball.position.y + tc.position.y) / 2;
+      // Bias toward forward direction so we don't drop too deep
+      targetX = midX + ad * 3;
+      targetY = midY;
+      targetX = Math.max(1, Math.min(pitch.width - 1, targetX));
+      targetY = Math.max(1, Math.min(pitch.height - 1, targetY));
+      speed = this.maxSpeed * 0.85;
+
+      // Cancel one-two if we've reached the target area or ball moved elsewhere
+      const dToTarget = this.distanceTo({ x: targetX, y: targetY });
+      const currentPossessor = realBall ? getBallPossessor(realBall, allPlayers) : null;
+      if (dToTarget < 3 || tc !== currentPossessor) {
+        this._oneTwoActive = false;
+        this._oneTwoTarget = null;
+      }
     } else if (gkHoldingBall && gkHoldingBall.team === this.team) {
       if (this.role === 'defender') {
         targetX = this.team === 'team1' ? centerX + 8 : centerX - 8;
@@ -369,10 +417,43 @@ export class Player {
         targetX = this._defensiveLineX(perceivedBall, pitch, allPlayers);
       }
       speed = 3.8;
+
+      // Urgency: adjust speed based on ball proximity to our goal
+      const ballDistFromGoal = Math.abs(perceivedBall.position.x - myGoalX);
+      const threatLevel = Math.max(0, 1 - ballDistFromGoal / (pitch.width * 0.6));
+      speed = 3.8 + threatLevel * 2.8; // 3.8 to 6.6 depending on threat
+
+      // Sprint if ball is very close to goal AND this player is close to the ball
+      const myDistToBall = this.distanceTo(perceivedBall.position);
+      if (threatLevel > 0.6 && myDistToBall < 15) {
+        speed = this.maxSpeed * 0.85;
+      }
     } else if (chaseBall) {
-      targetX = perceivedBall.position.x;
-      targetY = perceivedBall.position.y;
-      speed = oppHasBall ? 5.6 : 5;
+      // Predict where the ball will be when we arrive
+      const distToBall = this.distanceTo(perceivedBall.position);
+      const ballSpeed = Math.sqrt(perceivedBall.velocity.x ** 2 + perceivedBall.velocity.y ** 2);
+
+      // Estimate how long until we reach the ball
+      const playerSpeed = oppHasBall ? 5.6 : 5;
+      const arrivalTime = ballSpeed > 0.3 ? distToBall / playerSpeed : 0;
+
+      // Predict ball position at arrival (look-ahead)
+      const lookAhead = Math.min(arrivalTime * 1.2, 1.5);
+      const predictX = perceivedBall.position.x + perceivedBall.velocity.x * lookAhead;
+      const predictY = perceivedBall.position.y + perceivedBall.velocity.y * lookAhead;
+
+      // Clamp prediction to pitch
+      targetX = Math.max(0.5, Math.min(pitch.width - 0.5, predictX));
+      targetY = Math.max(0.5, Math.min(pitch.height - 0.5, predictY));
+
+      // Closer to the ball → sprint harder. Far away → steady approach.
+      const urgency = Math.max(0.3, 1 - distToBall / 20);
+      speed = (oppHasBall ? 5.6 : 5) * (0.6 + urgency * 0.4);
+
+      // If ball is very close, always sprint
+      if (distToBall < 4) speed = this.maxSpeed * 0.9;
+      // If ball is airborne, sprint extra hard to intercept the landing
+      if (perceivedBall.isAirborne) speed = this.maxSpeed;
     } else {
       // Idle / loose ball non-chaser: return to formation home position
       const home = this.getHomePosition(perceivedBall, pitch);
@@ -469,52 +550,36 @@ export class Player {
   }
 
   pickBestPassTarget(ball, pitch, allPlayers) {
-    const ad = attackDir(this.team);
-    let best = null;
-    let bestScore = -Infinity;
+    // Use the smart passing AI — returns sorted targets with lane/lead analysis
+    const options = findPassTargets(this, ball, pitch, allPlayers, CONFIG.ai);
+    // Cache top 3 for rendering
+    this._passTargetOptions = options.slice(0, 3);
+    if (options.length === 0) return null;
 
-    for (const t of allPlayers) {
-      if (t === this || t.team !== this.team || t.isGoalkeeper) continue;
-
-      const dx = t.position.x - ball.position.x;
-      const dy = t.position.y - ball.position.y;
-      const dist = Math.sqrt(dx * dx + dy * dy);
-      if (dist < 2.2 || dist > 38) continue;
-
-      const forward = ad * (t.position.x - ball.position.x);
-      let open = Infinity;
-      for (const o of allPlayers) {
-        if (o.team === this.team) continue;
-        const od = o.distanceTo(t.position);
-        if (od < open) open = od;
-      }
-
-      const score =
-        forward * 0.22 +
-        open * 0.5 -
-        dist * 0.07 +
-        (this.role === 'attacker' && t.role === 'attacker' ? 0.4 : 0) +
-        Math.random() * 0.35;
-
-      if (score > bestScore) {
-        bestScore = score;
-        best = { player: t, dist, score: bestScore };
-      }
-    }
-
-    return best;
+    const best = options[0];
+    return {
+      player: best.player,
+      dist: best.leadDist,
+      score: best.score,
+      laneClear: best.laneClear,
+      leadPos: best.leadPos,
+      power: best.power,
+    };
   }
 
-  passTo(ball, teammate, power) {
+  passTo(ball, teammate, power, leadPos = null) {
     if (this.kickCooldown > 0) return;
 
-    const dx = teammate.position.x - ball.position.x;
-    const dy = teammate.position.y - ball.position.y;
+    // Use lead position if provided (smart pass), otherwise current position
+    const target = leadPos || teammate.position;
+
+    const dx = target.x - ball.position.x;
+    const dy = target.y - ball.position.y;
     const dist = Math.sqrt(dx * dx + dy * dy);
     if (dist < 0.12) return;
 
-    let vx = (dx / dist) * power + teammate.velocity.x * 0.28;
-    let vy = (dy / dist) * power + teammate.velocity.y * 0.28;
+    let vx = (dx / dist) * power + teammate.velocity.x * 0.3;
+    let vy = (dy / dist) * power + teammate.velocity.y * 0.3;
     const mag = Math.sqrt(vx * vx + vy * vy);
     if (mag < 0.01) return;
 
@@ -522,6 +587,7 @@ export class Player {
     ball.velocity.y = vy;
     ball.spin = (Math.random() - 0.5) * 5;
     this.kickCooldown = 0.4;
+    this._lastPassTo = teammate;
   }
 
   handleBallCarrier(ball, pitch, dt, allPlayers) {
@@ -541,12 +607,21 @@ export class Player {
       passInfo &&
       (goodPass || longHold || (urgentPass && passInfo.score > 1.5))
     ) {
-      const pwr = Math.min(
+      const pwr = passInfo.power || Math.min(
         AI.passPowerMax,
         Math.max(AI.passPowerMin, passInfo.dist * 0.62 + 4),
       );
-      this.passTo(ball, passInfo.player, pwr);
+      // Use lead position for smart passing (where receiver will be)
+      const leadPos = passInfo.leadPos || null;
+      this.passTo(ball, passInfo.player, pwr, leadPos);
       this._ballCarrierTime = 0;
+
+      // Trigger one-two: after passing, immediately make a return run
+      // Only do this if passInfo.player is valid (not null)
+      if (passInfo.player && oneTwoViable(this, ball, passInfo)) {
+        this._oneTwoActive = true;
+        this._oneTwoTarget = passInfo.player;
+      }
       return;
     }
 
@@ -608,6 +683,22 @@ export class Player {
       return;
     }
 
+    // Chip pass: try to lift the ball over a close blocker
+    if (this.kickCooldown <= 0 && pressure < 2.0 && passInfo && passInfo.score > 0.5) {
+      const chipTarget = this._tryChipPass(ball, pitch, allPlayers);
+      if (chipTarget) {
+        ball.velocity.x = chipTarget.vx;
+        ball.velocity.y = chipTarget.vy;
+        ball.spin = (Math.random() - 0.5) * 8;
+        ball.isAirborne = true;
+        ball.airborneTime = 0.6;
+        ball.height = 0.4;
+        this.kickCooldown = 0.5;
+        this._ballCarrierTime = 0;
+        return;
+      }
+    }
+
     if (distToGoal > 0.8) {
       const gdx = dx / distToGoal;
       const gdy = dy / distToGoal;
@@ -622,6 +713,67 @@ export class Player {
       this.velocity.x = tx * AI.dribbleSpeed;
       this.velocity.y = ty * AI.dribbleSpeed;
     }
+  }
+
+  /**
+   * Attempt a chip pass over a nearby opponent.
+   * Returns { vx, vy } if a chip opportunity exists, null otherwise.
+   */
+  _tryChipPass(ball, pitch, allPlayers) {
+    if (this.kickCooldown > 0) return null;
+
+    // Find closest opponent directly between us and our best forward option
+    const ad = attackDir(this.team);
+    const forwardX = this.position.x + ad * 12;
+    const forwardY = this.position.y;
+
+    let blocker = null;
+    let blockerDist = Infinity;
+    for (const o of allPlayers) {
+      if (o.team === this.team) continue;
+      const d = o.distanceTo({ x: (this.position.x + forwardX) / 2, y: forwardY });
+      if (d < blockerDist) {
+        blockerDist = d;
+        blocker = o;
+      }
+    }
+
+    // Only chip if there's a blocker within 3m ahead
+    if (!blocker || blockerDist > 3.5) return null;
+
+    // Find a teammate beyond the blocker who is open
+    let bestTarget = null;
+    let bestScore = -Infinity;
+    for (const t of allPlayers) {
+      if (t === this || t.team !== this.team || t.isGoalkeeper) continue;
+      // Must be past the blocker (in attack direction)
+      if (ad * (t.position.x - blocker.position.x) < 0) continue;
+      const d = t.distanceTo(blocker.position);
+      if (d < 2) continue; // too close to blocker even if forward
+      const openDist = d;
+      const forwardProg = ad * (t.position.x - this.position.x);
+      const score = openDist * 0.5 + forwardProg * 0.2;
+      if (score > bestScore) {
+        bestScore = score;
+        bestTarget = t;
+      }
+    }
+
+    if (!bestTarget) return null;
+
+    // Chip: lob the ball over the blocker to the target
+    const targetX = bestTarget.position.x;
+    const targetY = bestTarget.position.y;
+    const dx = targetX - ball.position.x;
+    const dy = targetY - ball.position.y;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    if (dist < 2) return null;
+
+    const power = Math.min(16, dist * 0.55 + 4);
+    const vx = (dx / dist) * power;
+    const vy = (dy / dist) * power - 6; // extra upward component for chip
+
+    return { vx, vy };
   }
 
   shoot(ball, opponentGk = null, underPressure = false) {

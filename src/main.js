@@ -12,6 +12,7 @@ const ctx = canvas.getContext('2d');
 let ppm = 15;
 let offsetX = 0;
 let offsetY = 0;
+let debugOffsetY = 0;
 
 const ballPhysics = new BallPhysics();
 const playerPhysics = new PlayerPhysics();
@@ -159,6 +160,7 @@ const deltaTimeMs = 16.67;
 let timeAccumulator = 0;
 let lastFrameTime = performance.now();
 let gameTime = 0;
+let isPaused = false;
 
 function getActivePlayers() {
   return players.filter(p => p.active);
@@ -175,10 +177,14 @@ function updateCanvasSize() {
   ppm = Math.min(15, maxWidth / totalWidth, maxHeight / totalHeight);
   ppm = Math.max(5, ppm);
 
+  const PITCH_HEIGHT = Math.ceil(totalHeight * ppm);
+  const DEBUG_HEIGHT = 160; // pixels for the debug panel below the pitch
+
   canvas.width  = Math.ceil(totalWidth  * ppm);
-  canvas.height = Math.ceil(totalHeight * ppm);
+  canvas.height = PITCH_HEIGHT + DEBUG_HEIGHT;
 
   offsetX = (pitch.goalDepth || 1) * ppm;
+  debugOffsetY = PITCH_HEIGHT; // pitch renders at top, debug panel below
 
   const label = pitch.name || 'Pitch';
   const mode  = pitch.width > 60 ? '11v11+GK' : '5v5+GK';
@@ -207,14 +213,25 @@ function loop() {
     lastFrameTime = now;
 
     if (frameTime > 50) frameTime = 50;
-    timeAccumulator += frameTime;
+    // Hard cap: never process more than 10 steps per frame (prevents spiral-of-death)
+    timeAccumulator = Math.min(timeAccumulator + frameTime, deltaTimeMs * 10);
+
+    // When paused, keep rendering but freeze physics
+    if (isPaused) {
+      render();
+      updateStats();
+      requestAnimationFrame(loop);
+      return;
+    }
 
     while (timeAccumulator >= deltaTimeMs) {
       const dt = deltaTimeMs / 1000;
       gameTime += dt;
 
       const active = getActivePlayers();
-      active.forEach(p => p.updateAI(ball, CONFIG.pitch, gameTime, dt, active));
+      active.forEach(p => {
+        try { p.updateAI(ball, CONFIG.pitch, gameTime, dt, active); } catch(e) { console.error('AI error:', e.message); }
+      });
       active.forEach(p => playerPhysics.update(p, dt));
       ballPhysics.update(ball, dt);
       collisionSystem.update(ball, active, dt);
@@ -280,7 +297,7 @@ function resetAfterGoal() {
 
   setTimeout(() => {
     ball.kick((Math.random() - 0.5) * 10, (Math.random() - 0.5) * 10, 10);
-  }, 500);
+  }, 100);
 }
 
 function updateStats() {
@@ -291,34 +308,222 @@ function updateStats() {
 }
 
 function render() {
-  ctx.fillStyle = CONFIG.rendering.pitchColor;
+  try {
+    ctx.fillStyle = CONFIG.rendering.pitchColor;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.save();
+    ctx.translate(offsetX, offsetY);
+    drawPitch();
+    getActivePlayers().forEach(p => drawPlayer(p));
+    drawPassIndicators();
+    drawBall();
+    ctx.restore();
+    if (goalFlashTeam) drawGoalFlash();
+    if (isPaused) drawPauseOverlay();
+    drawDebugPanel();
+  } catch(e) {
+    console.error('Render error:', e.message);
+    try { ctx.restore(); } catch(_) {}
+  }
+}
+
+function drawGoalFlash() {
+  const alpha = 0.22 + 0.08 * Math.sin(performance.now() / 200);
+  ctx.fillStyle = `rgba(255, 220, 60, ${alpha})`;
   ctx.fillRect(0, 0, canvas.width, canvas.height);
+  const name = goalFlashTeam === 'team1' ? 'RED' : 'BLUE';
+  ctx.fillStyle = '#fff';
+  ctx.font = 'bold 36px monospace';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('GOAL!', canvas.width / 2, canvas.height / 2 - 28);
+  ctx.font = 'bold 22px monospace';
+  ctx.fillStyle = goalFlashTeam === 'team1' ? '#ff6b6b' : '#74c0fc';
+  ctx.fillText(name, canvas.width / 2, canvas.height / 2 + 22);
+}
+
+function drawPassIndicators() {
+  // Find the ball carrier
+  const active = getActivePlayers();
+  let carrier = null;
+  let minDist = Infinity;
+  for (const p of active) {
+    if (p.isGoalkeeper) continue;
+    const d = p.distanceTo(ball.position);
+    if (d < p.influenceRadius + ball.radius && d < minDist) {
+      minDist = d;
+      carrier = p;
+    }
+  }
+  if (!carrier || carrier._passTargetOptions.length === 0) return;
+
+  // Draw indicators for top 3 pass targets
+  const options = carrier._passTargetOptions;
+  const colors = ['#00FF88', '#FFD700', '#FF8C00']; // gold, silver, bronze
+  const labels = ['1st', '2nd', '3rd'];
+
+  options.forEach((opt, i) => {
+    const t = opt.player;
+    const cx = t.position.x * ppm;
+    const cy = t.position.y * ppm;
+    const color = colors[i] || '#888888';
+
+    // Pulsing ring around the target
+    const pulse = 1 + 0.08 * Math.sin(performance.now() / 250 + i);
+    const outerR = (t.radius + 0.6) * ppm * pulse;
+    const innerR = (t.radius + 0.3) * ppm;
+
+    ctx.beginPath();
+    ctx.arc(cx, cy, outerR, 0, Math.PI * 2);
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 2.5;
+    ctx.globalAlpha = 0.8;
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+
+    // Small label
+    ctx.fillStyle = color;
+    ctx.font = `bold 9px monospace`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'bottom';
+    ctx.fillText(labels[i], cx, cy - outerR - 2);
+
+    // Draw dotted pass line from carrier to target
+    if (opt.leadPos) {
+      ctx.beginPath();
+      ctx.setLineDash([4, 4]);
+      ctx.moveTo(ball.position.x * ppm, ball.position.y * ppm);
+      ctx.lineTo(opt.leadPos.x * ppm, opt.leadPos.y * ppm);
+      ctx.strokeStyle = opt.laneClear ? 'rgba(0,255,136,0.4)' : 'rgba(255,80,80,0.35)';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      // Lead position dot
+      ctx.beginPath();
+      ctx.arc(opt.leadPos.x * ppm, opt.leadPos.y * ppm, 3, 0, Math.PI * 2);
+      ctx.fillStyle = opt.laneClear ? 'rgba(0,255,136,0.5)' : 'rgba(255,80,80,0.5)';
+      ctx.fill();
+    }
+  });
+
+  // Label carrier
+  const ccx = carrier.position.x * ppm;
+  const ccy = carrier.position.y * ppm;
+  ctx.fillStyle = '#ffffff';
+  ctx.font = 'bold 8px monospace';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'bottom';
+  ctx.fillText('⚡ CARRYING', ccx, ccy - (carrier.radius + 0.7) * ppm);
+}
+
+function drawPauseOverlay() {
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.55)';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.fillStyle = '#fff';
+  ctx.font = 'bold 32px monospace';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('⏸  PAUSED  —  Press SPACE to resume', canvas.width / 2, canvas.height / 2);
+}
+
+function drawDebugPanel() {
+  const active = getActivePlayers();
+  const startY = debugOffsetY + 8;
+  const rowH = 13;
+  const team1Players = active.filter(p => p.team === 'team1').sort((a,b) => a.id - b.id);
+  const team2Players = active.filter(p => p.team === 'team2').sort((a,b) => a.id - b.id);
 
   ctx.save();
-  ctx.translate(offsetX, offsetY);
 
-  drawPitch();
-  getActivePlayers().forEach(p => drawPlayer(p));
-  drawBall();
+  // Background
+  ctx.fillStyle = '#0d1117';
+  ctx.fillRect(0, debugOffsetY, canvas.width, 160);
+
+  // Header
+  ctx.font = 'bold 9px monospace';
+  ctx.fillStyle = '#8b949e';
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'top';
+  ctx.fillText('T', 6, startY);
+  ctx.fillText('ID', 26, startY);
+  ctx.fillText('ROLE', 46, startY);
+  ctx.fillText('DIST', 80, startY);
+  ctx.fillText('SPD', 112, startY);
+  ctx.fillText('STATE', 140, startY);
+  ctx.fillText('BALL', 230, startY);
+
+  // Divider
+  ctx.strokeStyle = '#21262d';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(0, startY + 14);
+  ctx.lineTo(canvas.width, startY + 14);
+  ctx.stroke();
+
+  function drawPlayerRow(p, y, color) {
+    const dist = p.distanceTo(ball.position);
+    const spd = p.getSpeed();
+    const state = getPlayerStateLabel(p, ball);
+
+    ctx.font = '9px monospace';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'top';
+
+    ctx.fillStyle = color;
+    ctx.fillText(p.team === 'team1' ? 'T1' : 'T2', 6, y);
+    ctx.fillText(`#${p.id}`, 26, y);
+    ctx.fillText((p.role || '?').slice(0, 10), 46, y);
+    ctx.fillStyle = dist < 2 ? '#ff6b6b' : dist < 8 ? '#ffd93d' : '#8b949e';
+    ctx.fillText(dist.toFixed(1), 80, y);
+    ctx.fillStyle = spd > p.maxSpeed * 0.8 ? '#ff6b6b' : '#8b949e';
+    ctx.fillText(spd.toFixed(1), 112, y);
+    ctx.fillStyle = '#c9d1d9';
+    ctx.fillText(state, 140, y);
+    ctx.fillStyle = '#8b949e';
+    ctx.fillText(ball.isAirborne ? 'AIR' : ball.heldBy ? 'HELD' : 'RUN', 230, y);
+  }
+
+  // Team 1
+  team1Players.forEach((p, i) => drawPlayerRow(p, startY + 18 + i * rowH, '#ff6b6b'));
+
+  // Separator
+  const sepY = startY + 18 + team1Players.length * rowH + 4;
+  ctx.strokeStyle = '#30363d';
+  ctx.beginPath();
+  ctx.moveTo(0, sepY);
+  ctx.lineTo(canvas.width, sepY);
+  ctx.stroke();
+
+  // Team 2
+  team2Players.forEach((p, i) => drawPlayerRow(p, sepY + 8 + i * rowH, '#74c0fc'));
+
+  // Hint
+  ctx.fillStyle = '#484f58';
+  ctx.font = '8px monospace';
+  ctx.textAlign = 'right';
+  ctx.textBaseline = 'bottom';
+  ctx.fillText('SPACE = pause/resume', canvas.width - 6, debugOffsetY + 156);
 
   ctx.restore();
+}
 
-  if (goalFlashTeam) {
-    ctx.save();
-    const alpha = 0.22 + 0.08 * Math.sin(performance.now() / 200);
-    ctx.fillStyle = `rgba(255, 220, 60, ${alpha})`;
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-    const name = goalFlashTeam === 'team1' ? 'RED' : 'BLUE';
-    ctx.fillStyle = '#fff';
-    ctx.font = 'bold 36px monospace';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText('GOAL!', canvas.width / 2, canvas.height / 2 - 28);
-    ctx.font = 'bold 22px monospace';
-    ctx.fillStyle = goalFlashTeam === 'team1' ? '#ff6b6b' : '#74c0fc';
-    ctx.fillText(name, canvas.width / 2, canvas.height / 2 + 22);
-    ctx.restore();
+function getPlayerStateLabel(p, ball) {
+  if (p.isGoalkeeper) {
+    if (p.isDiving) return 'DIVING';
+    if (p.holdingBall) return 'HOLDING';
+    return 'GK';
   }
+  if (p._oneTwoActive) return '1-2 RUN';
+  if (p._isRunningBehind) return 'RUN-BEHIND';
+  if (p._ballCarrierTime > 3) return 'CARRYING';
+  if (p.kickCooldown > 0) return 'KICK-CD';
+  const dist = p.distanceTo(ball.position);
+  if (dist < p.influenceRadius + ball.radius) return 'NEAR BALL';
+  const possessor = getBallPossessor(ball, getActivePlayers());
+  if (possessor && possessor.team === p.team && possessor !== p) return 'SUPPORT';
+  if (possessor && possessor.team !== p.team) return 'CHASING';
+  return 'IDLE';
 }
 
 function drawPitch() {
@@ -489,6 +694,9 @@ function setField(type) {
     p.stamina     = p.staminaMax;
     p.targetGoal  = null;
     p._ballCarrierTime = 0;
+    p._oneTwoActive    = false;
+    p._oneTwoTarget    = null;
+    p._passTargetOptions = [];
     if (p.isGoalkeeper) {
       p.holdingBall = false;
       p.holdTime    = 0;
@@ -499,8 +707,24 @@ function setField(type) {
   applyFormationSlots();
   setInitialPositions();
 
-  setTimeout(() => ball.kick((Math.random() - 0.5) * 10, (Math.random() - 0.5) * 10, 10), 300);
+  ball.kick((Math.random() - 0.5) * 10, (Math.random() - 0.5) * 10, 10);
+
+  // Space to pause/resume
+  window.addEventListener('keydown', e => {
+    if (e.code === 'Space' || e.key === ' ') {
+      e.preventDefault();
+      isPaused = !isPaused;
+    }
+  });
 }
 
 updateCanvasSize();
 loop();
+
+// Capture uncaught errors
+window.addEventListener('error', e => {
+  console.error('UNCAUGHT:', e.message, '|', e.filename, 'line', e.lineno);
+});
+window.addEventListener('unhandledrejection', e => {
+  console.error('UNHANDLED:', e.reason?.message || e.reason);
+});
