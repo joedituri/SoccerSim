@@ -7,7 +7,7 @@ function attackDir(team) {
 }
 
 /** Nearest outfield player to ball with influence (exclusive possessor). */
-function getBallPossessor(ball, allPlayers) {
+export function getBallPossessor(ball, allPlayers) {
   if (ball.heldBy) return null;
   let best = null;
   let bestD = Infinity;
@@ -54,7 +54,7 @@ export class Player {
     
     this.isGoalkeeper = (role === 'goalkeeper');
     if (this.isGoalkeeper) {
-      this.influenceRadius = 0.3;
+      this.influenceRadius = 1.2;
       this.holdingBall = false;
       this.holdTime = 0;
       this.goalLine = null;
@@ -273,14 +273,14 @@ export class Player {
     // Proximity override: if ball is loose and VERY close to a non-chaser, they also react
     const ballIsLoose = !possessor;
     const myDistToBall = this.distanceTo(perceivedBall.position);
-    const proximityTrigger = ballIsLoose && !isChaser && myDistToBall < 6; // 6m trigger radius
+    const proximityTrigger = ballIsLoose && !isChaser && myDistToBall < 3.5; // 3.5m trigger radius
     if (proximityTrigger) {
       // Sprint toward predicted ball position
       const ballSpeed = Math.sqrt(perceivedBall.velocity.x ** 2 + perceivedBall.velocity.y ** 2);
       const lookAhead = Math.min(1.0, myDistToBall / 5);
       const targetX = Math.max(0.5, Math.min(pitch.width - 0.5, perceivedBall.position.x + perceivedBall.velocity.x * lookAhead));
       const targetY = Math.max(0.5, Math.min(pitch.height - 0.5, perceivedBall.position.y + perceivedBall.velocity.y * lookAhead));
-      const urgency = Math.max(0.3, 1 - myDistToBall / 6);
+      const urgency = Math.max(0.3, 1 - myDistToBall / 3.5);
       const speed = this.maxSpeed * (0.5 + urgency * 0.5);
       const dx = targetX - this.position.x;
       const dy = targetY - this.position.y;
@@ -843,7 +843,7 @@ export class Player {
     const dist = Math.sqrt(dx * dx + dy * dy);
 
     if (dist > 0.2) {
-      const speed = 1; // Nerfed from 4
+      const speed = Math.min(this.maxSpeed, 5);
       this.velocity.x = (dx / dist) * speed;
       this.velocity.y = (dy / dist) * speed;
     } else {

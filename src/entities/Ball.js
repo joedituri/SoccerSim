@@ -7,7 +7,6 @@ export class Ball {
     this.velocity = { x: 0, y: 0 }; // m/s
     this.spin = 0;                  // rad/s ( Magnus effect )
     this.radius = CONFIG.physics.ball.radius;
-    this.owner = null;
 
     // Airborne state
     this.isAirborne = false;
