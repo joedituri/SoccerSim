@@ -150,7 +150,9 @@ export class CollisionSystem {
     const moveAngle = Math.atan2(player.velocity.y, player.velocity.x);
     const kickAngle = Math.atan2(ny, nx);
     const angleDiff = moveAngle - kickAngle;
-    ball.spin = Math.sin(angleDiff) * 15 * (player.getSpeed() / player.maxSpeed);
+    const maxSpin = CONFIG.physics.ball.maxSpin;
+    ball.spin = Math.max(-maxSpin, Math.min(maxSpin,
+      Math.sin(angleDiff) * 15 * (player.getSpeed() / player.maxSpeed)));
 
     player.kickCooldown = 0.3;
 

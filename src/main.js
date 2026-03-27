@@ -236,7 +236,24 @@ function loop() {
       ballPhysics.update(ball, dt);
       collisionSystem.update(ball, active, dt);
 
+      // Check goals after position integration but note: boundary handler
+      // already lets balls through the goal opening, so this ordering is safe.
       checkGoals();
+
+      // Clamp ball velocity as a safety net against NaN / runaway values
+      const bSpeed = ball.getSpeed();
+      if (!isFinite(bSpeed) || bSpeed > 35) {
+        const cap = 25;
+        if (!isFinite(bSpeed)) {
+          ball.velocity.x = 0;
+          ball.velocity.y = 0;
+          ball.spin = 0;
+        } else {
+          const s = cap / bSpeed;
+          ball.velocity.x *= s;
+          ball.velocity.y *= s;
+        }
+      }
 
       timeAccumulator -= deltaTimeMs;
     }
