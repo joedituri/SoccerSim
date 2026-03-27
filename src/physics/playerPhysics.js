@@ -86,7 +86,7 @@ export class PlayerPhysics {
     const sprinting = (player.isSprinting || aiSprinting) && player.isMoving();
 
     if (sprinting) {
-      player.stamina = Math.max(0, player.stamina - player.staminaSprintCost * dt * 10);
+      player.stamina = Math.max(0, player.stamina - player.staminaSprintCost * dt);
     } else if (!player.isMoving()) {
       player.stamina = Math.min(player.staminaMax, player.stamina + player.staminaRecoveryRate * dt);
     } else {

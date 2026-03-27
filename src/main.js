@@ -2,7 +2,7 @@
 import { CONFIG } from './config.js';
 import { Ball } from './entities/Ball.js';
 import { BallPhysics } from './physics/ballPhysics.js';
-import { Player } from './entities/Player.js';
+import { Player, getBallPossessor } from './entities/Player.js';
 import { PlayerPhysics } from './physics/playerPhysics.js';
 import { CollisionSystem } from './physics/collision.js';
 
@@ -355,15 +355,16 @@ function drawPassIndicators() {
       carrier = p;
     }
   }
-  if (!carrier || carrier._passTargetOptions.length === 0) return;
+  if (!carrier || !carrier._passTargetOptions || carrier._passTargetOptions.length === 0) return;
 
-  // Draw indicators for top 3 pass targets
-  const options = carrier._passTargetOptions;
+  // Draw indicators for top 3 pass targets (filter out any stale/invalid entries)
+  const options = carrier._passTargetOptions.filter(opt => opt && opt.player && opt.player.active);
   const colors = ['#00FF88', '#FFD700', '#FF8C00']; // gold, silver, bronze
   const labels = ['1st', '2nd', '3rd'];
 
   options.forEach((opt, i) => {
     const t = opt.player;
+    if (!t || !t.position) return;
     const cx = t.position.x * ppm;
     const cy = t.position.y * ppm;
     const color = colors[i] || '#888888';
