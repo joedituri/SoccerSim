@@ -1,6 +1,6 @@
 // Player entity (metric units) - Passing, support, defense
 import { CONFIG } from '../config.js';
-import { findPassTargets, isLaneClear, predictReceivingPosition, oneTwoViable } from '../ai/PassingAI.js';
+import { findPassTargets, isLaneClear, predictReceivingPosition, oneTwoViable, findInterceptionPoint } from '../ai/PassingAI.js';
 
 function attackDir(team) {
   return team === 'team1' ? -1 : 1;
