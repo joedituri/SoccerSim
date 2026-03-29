@@ -429,31 +429,21 @@ export class Player {
         speed = this.maxSpeed * 0.85;
       }
     } else if (chaseBall) {
-      // Predict where the ball will be when we arrive
+      const playerSpeed = oppHasBall ? 5.6 : 5;
+
+      // Predictive interception: find the earliest point where player can beat the ball
+      const intercept = findInterceptionPoint(this, perceivedBall, pitch, playerSpeed);
+      targetX = Math.max(0.5, Math.min(pitch.width - 0.5, intercept.x));
+      targetY = Math.max(0.5, Math.min(pitch.height - 0.5, intercept.y));
+
+      // Urgency: faster when ball is close or coming fast
       const distToBall = this.distanceTo(perceivedBall.position);
       const ballSpeed = Math.sqrt(perceivedBall.velocity.x ** 2 + perceivedBall.velocity.y ** 2);
-
-      // Estimate how long until we reach the ball
-      const playerSpeed = oppHasBall ? 5.6 : 5;
-      const arrivalTime = ballSpeed > 0.3 ? distToBall / playerSpeed : 0;
-
-      // Predict ball position at arrival (look-ahead)
-      const lookAhead = Math.min(arrivalTime * 1.2, 1.5);
-      const predictX = perceivedBall.position.x + perceivedBall.velocity.x * lookAhead;
-      const predictY = perceivedBall.position.y + perceivedBall.velocity.y * lookAhead;
-
-      // Clamp prediction to pitch
-      targetX = Math.max(0.5, Math.min(pitch.width - 0.5, predictX));
-      targetY = Math.max(0.5, Math.min(pitch.height - 0.5, predictY));
-
-      // Closer to the ball → sprint harder. Far away → steady approach.
       const urgency = Math.max(0.3, 1 - distToBall / 20);
-      speed = (oppHasBall ? 5.6 : 5) * (0.6 + urgency * 0.4);
+      speed = playerSpeed * (0.6 + urgency * 0.4);
 
-      // If ball is very close, always sprint
-      if (distToBall < 4) speed = this.maxSpeed * 0.9;
-      // If ball is airborne, sprint extra hard to intercept the landing
-      if (perceivedBall.isAirborne) speed = this.maxSpeed;
+      // If ball is very close or airborne, always sprint
+      if (distToBall < 4 || perceivedBall.isAirborne) speed = this.maxSpeed;
     } else {
       // Idle / loose ball non-chaser: return to formation home position
       const home = this.getHomePosition(perceivedBall, pitch);

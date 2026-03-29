@@ -1,0 +1,350 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>QR Code Generator</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: #0a0a0f;
+      color: #e0e0e0;
+      font-family: 'Courier New', monospace;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 32px 16px;
+    }
+
+    h1 {
+      font-size: 1.4rem;
+      letter-spacing: 0.15em;
+      color: #00ff88;
+      text-transform: uppercase;
+      margin-bottom: 8px;
+    }
+
+    .subtitle {
+      color: #555;
+      font-size: 0.75rem;
+      margin-bottom: 28px;
+      letter-spacing: 0.1em;
+    }
+
+    .card {
+      background: #111118;
+      border: 1px solid #222233;
+      border-radius: 8px;
+      padding: 24px;
+      width: 100%;
+      max-width: 420px;
+    }
+
+    label {
+      display: block;
+      font-size: 0.7rem;
+      letter-spacing: 0.12em;
+      color: #666;
+      text-transform: uppercase;
+      margin-bottom: 6px;
+    }
+
+    textarea {
+      width: 100%;
+      height: 100px;
+      background: #0a0a0f;
+      border: 1px solid #2a2a3a;
+      border-radius: 4px;
+      color: #e0e0e0;
+      font-family: 'Courier New', monospace;
+      font-size: 0.9rem;
+      padding: 10px 12px;
+      resize: vertical;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+
+    textarea:focus { border-color: #00ff88; }
+    textarea::placeholder { color: #333; }
+
+    .row {
+      display: flex;
+      gap: 12px;
+      margin-top: 14px;
+    }
+
+    .field { flex: 1; }
+
+    select {
+      width: 100%;
+      background: #0a0a0f;
+      border: 1px solid #2a2a3a;
+      border-radius: 4px;
+      color: #e0e0e0;
+      font-family: 'Courier New', monospace;
+      font-size: 0.85rem;
+      padding: 8px 10px;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+
+    select:focus { border-color: #00ff88; }
+
+    .btn {
+      width: 100%;
+      margin-top: 16px;
+      background: #00ff88;
+      color: #0a0a0f;
+      border: none;
+      border-radius: 4px;
+      padding: 12px;
+      font-family: 'Courier New', monospace;
+      font-size: 0.85rem;
+      font-weight: bold;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      cursor: pointer;
+      transition: opacity 0.2s;
+    }
+
+    .btn:hover { opacity: 0.85; }
+    .btn:active { opacity: 0.7; }
+
+    .output {
+      margin-top: 24px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 14px;
+    }
+
+    #qrcode {
+      background: #fff;
+      border-radius: 6px;
+      padding: 16px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    #qrcode img { display: block; max-width: 100%; }
+
+    .actions {
+      display: flex;
+      gap: 8px;
+      width: 100%;
+    }
+
+    .btn-outline {
+      flex: 1;
+      background: transparent;
+      border: 1px solid #2a2a3a;
+      color: #888;
+      border-radius: 4px;
+      padding: 8px;
+      font-family: 'Courier New', monospace;
+      font-size: 0.72rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      cursor: pointer;
+      transition: border-color 0.2s, color 0.2s;
+    }
+
+    .btn-outline:hover { border-color: #00ff88; color: #00ff88; }
+
+    .error {
+      color: #ff4444;
+      font-size: 0.75rem;
+      margin-top: 8px;
+      text-align: center;
+    }
+
+    .info {
+      color: #444;
+      font-size: 0.7rem;
+      margin-top: 16px;
+      text-align: center;
+      line-height: 1.6;
+    }
+  </style>
+</head>
+<body>
+  <h1>QR Generator</h1>
+  <p class="subtitle">encode text · url · wifi · vcard</p>
+
+  <div class="card">
+    <label>Content</label>
+    <textarea id="content" placeholder="https://example.com" spellcheck="false"></textarea>
+
+    <div class="row">
+      <div class="field">
+        <label>Size</label>
+        <select id="size">
+          <option value="128">128 px</option>
+          <option value="256" selected>256 px</option>
+          <option value="384">384 px</option>
+          <option value="512">512 px</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>Error level</label>
+        <select id="level">
+          <option value="L">Low — max storage</option>
+          <option value="M" selected>Medium</option>
+          <option value="Q">Quartile</option>
+          <option value="H">High — damaged scans</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="row" style="margin-top:12px">
+      <div class="field">
+        <label>Foreground</label>
+        <div style="display:flex;gap:8px;align-items:center">
+          <input type="color" id="colorDark" value="#000000" style="width:36px;height:28px;border:none;background:none;cursor:pointer;padding:0">
+          <input type="text" id="colorDarkText" value="#000000" style="flex:1;background:#0a0a0f;border:1px solid #2a2a3a;border-radius:4px;color:#e0e0e0;font-family:'Courier New',monospace;font-size:0.8rem;padding:6px 8px">
+        </div>
+      </div>
+      <div class="field">
+        <label>Background</label>
+        <div style="display:flex;gap:8px;align-items:center">
+          <input type="color" id="colorLight" value="#ffffff" style="width:36px;height:28px;border:none;background:none;cursor:pointer;padding:0">
+          <input type="text" id="colorLightText" value="#ffffff" style="flex:1;background:#0a0a0f;border:1px solid #2a2a3a;border-radius:4px;color:#e0e0e0;font-family:'Courier New',monospace;font-size:0.8rem;padding:6px 8px">
+        </div>
+      </div>
+    </div>
+
+    <button class="btn" id="generate">Generate QR Code</button>
+    <p class="error" id="error"></p>
+
+    <div class="output" id="output" style="display:none; margin-top:16px">
+      <div id="qrcode"></div>
+      <div class="actions">
+        <button class="btn-outline" id="downloadPng">PNG</button>
+        <button class="btn-outline" id="downloadSvg">SVG</button>
+        <button class="btn-outline" id="copyData">Copy Data</button>
+      </div>
+    </div>
+
+    <p class="info" id="info"></p>
+  </div>
+
+  <!-- QRCode.js — Kazuhiko Arase — MIT License -->
+  <script src="libqr.js"></script>
+  <script>
+    const contentEl   = document.getElementById('content');
+    const sizeEl      = document.getElementById('size');
+    const levelEl     = document.getElementById('level');
+    const generateEl  = document.getElementById('generate');
+    const outputEl    = document.getElementById('output');
+    const qrcodeEl    = document.getElementById('qrcode');
+    const errorEl     = document.getElementById('error');
+    const infoEl      = document.getElementById('info');
+
+    let lastData = '';
+    let lastDataUrl = '';
+
+    generateEl.addEventListener('click', generate);
+    contentEl.addEventListener('keydown', e => {
+      if (e.key === 'Enter' && e.ctrlKey) generate();
+    });
+
+    // Sync color pickers with text inputs
+    ['colorDark', 'colorLight'].forEach(id => {
+      const picker = document.getElementById(id);
+      const text  = document.getElementById(id + 'Text');
+      picker.addEventListener('input', () => { text.value = picker.value; if (lastData) generate(); });
+      text.addEventListener('input',  () => { if (/^#[0-9a-fA-F]{6}$/.test(text.value)) { picker.value = text.value; if (lastData) generate(); } });
+    });
+    document.getElementById('downloadPng').addEventListener('click', downloadPNG);
+    document.getElementById('downloadSvg').addEventListener('click', downloadSVG);
+    document.getElementById('copyData').addEventListener('click', copyData);
+
+    function generate() {
+      errorEl.textContent = '';
+      const text = contentEl.value.trim();
+      if (!text) { errorEl.textContent = 'Enter some content first.'; return; }
+
+      const px = parseInt(sizeEl.value);
+      const ecLevel = levelEl.value;
+
+      lastData = text;
+      qrcodeEl.innerHTML = '';
+
+      QRCode.toDataURL(text, {
+        width: px,
+        margin: 1,
+        errorCorrectionLevel: ecLevel,
+        type: 'image/png',
+        color: {
+          dark: document.getElementById('colorDark').value,
+          light: document.getElementById('colorLight').value,
+        },
+      }, (err, url) => {
+        if (err) {
+          errorEl.textContent = err.message || 'Failed to generate QR code.';
+          return;
+        }
+        errorEl.textContent = '';
+        lastDataUrl = url;
+        qrcodeEl.innerHTML = '';
+        const img = document.createElement('img');
+        img.src = url;
+        img.alt = 'QR Code';
+        img.width = px;
+        img.height = px;
+        qrcodeEl.appendChild(img);
+        outputEl.style.display = 'flex';
+
+        const bytes = new TextEncoder().encode(text).length;
+        infoEl.textContent = `${text.length} chars · ${bytes} bytes · EC ${ecLevel}`;
+      });
+    }
+
+    function downloadPNG() {
+      if (!lastDataUrl) return;
+      const a = document.createElement('a');
+      a.download = 'qrcode.png';
+      a.href = lastDataUrl;
+      a.click();
+    }
+
+    function downloadSvg() {
+      if (!lastData) return;
+      const px = parseInt(sizeEl.value);
+      QRCode.toString(lastData, {
+        type: 'svg',
+        width: px,
+        margin: 1,
+        errorCorrectionLevel: levelEl.value,
+        color: {
+          dark: document.getElementById('colorDark').value,
+          light: document.getElementById('colorLight').value,
+        },
+      }, (err, svg) => {
+        if (err) return;
+        const blob = new Blob([svg], { type: 'image/svg+xml' });
+        const a = document.createElement('a');
+        a.download = 'qrcode.svg';
+        a.href = URL.createObjectURL(blob);
+        a.click();
+      });
+    }
+
+    function copyData() {
+      if (!lastData) return;
+      navigator.clipboard.writeText(lastData).then(() => {
+        const btn = document.getElementById('copyData');
+        btn.textContent = 'Copied!';
+        setTimeout(() => btn.textContent = 'Copy Data', 1200);
+      });
+    }
+
+    // Auto-generate on load
+    contentEl.value = 'https://clawsnap.xyz';
+    generate();
+  </script>
+</body>
+</html>

@@ -177,7 +177,96 @@ export function findPassTargets(carrier, ball, pitch, allPlayers, AI) {
  * Attempt a chip / lob pass over a blocking opponent.
  * Returns a { targetX, targetY, power } or null if no chip opportunity.
  */
-export function findChipOpportunity(carrier, ball, pitch, allPlayers, AI) {
+
+/**
+ * Predictive interception — the core algorithm.
+ *
+ * Simulates the ball's future trajectory over small time steps.
+ * For each step t, computes:
+ *   - where the ball will be at time t (accounting for friction and wall bounces)
+ *   - how long it would take the player to reach that point
+ *
+ * The FIRST step where player_travel_time <= t is the earliest
+ * reachable interception point. If no such step exists, falls back to
+ * the ball's final predicted position.
+ *
+ * Recalculate every frame so players continuously adjust.
+ */
+export function findInterceptionPoint(player, ballState, pitch, playerSpeed) {
+  const dt = 0.1;        // simulation time step (seconds)
+  const maxSteps = 40;   // simulate 4 seconds ahead
+  const friction = 0.982; // per-frame velocity multiplier (approx for ground ball)
+  const restitution = 0.65; // wall bounce energy retention
+  const goalWidth = pitch.goalWidth || 3;
+  const goalY = (pitch.height - goalWidth) / 2;
+  const radius = 0.22; // ball radius
+
+  let vx = ballState.velocity.x;
+  let vy = ballState.velocity.y;
+  let px = ballState.position.x;
+  let py = ballState.position.y;
+
+  let bestStep = -1;
+  let bestX = px + vx * maxSteps * dt * 2; // fallback: far future position
+  let bestY = py + vy * maxSteps * dt * 2;
+
+  for (let step = 1; step <= maxSteps; step++) {
+    const t = step * dt;
+
+    // Advance ball by one time step (simplified physics)
+    vx *= friction;
+    vy *= friction;
+    px += vx * dt;
+    py += vy * dt;
+
+    // Handle wall bounces
+    const inLeftGoal = py >= goalY && py <= goalY + goalWidth;
+    const inRightGoal = py >= goalY && py <= goalY + goalWidth;
+
+    if (px - radius < 0 && !inLeftGoal) {
+      px = radius - (px - radius);
+      vx = Math.abs(vx) * restitution;
+    } else if (px + radius > pitch.width && !inRightGoal) {
+      px = (pitch.width - radius) - (px - (pitch.width - radius));
+      vx = -Math.abs(vx) * restitution;
+    }
+    if (py - radius < 0) {
+      py = radius - (py - radius);
+      vy = Math.abs(vy) * restitution;
+    } else if (py + radius > pitch.height) {
+      py = (pitch.height - radius) - (py - (pitch.height - radius));
+      vy = -Math.abs(vy) * restitution;
+    }
+
+    // Clamp
+    px = Math.max(radius, Math.min(pitch.width - radius, px));
+    py = Math.max(radius, Math.min(pitch.height - radius, py));
+
+    // Distance from player to this ball position
+    const dx = px - player.position.x;
+    const dy = py - player.position.y;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+
+    // Travel time for player (accounting for acceleration ramp-up)
+    // Time = ramp-up phase + cruise phase
+    // ramp-up: accelerate from 0 to maxSpeed over ~0.4s, avg speed = maxSpeed * 0.5
+    // cruise: cover remaining distance at maxSpeed
+    const rampDist = playerSpeed * 0.5 * 0.4; // distance covered during 0.4s ramp
+    const cruiseDist = Math.max(0, dist - rampDist);
+    const travelTime = 0.4 + cruiseDist / playerSpeed;
+
+    if (travelTime <= t) {
+      // Player can intercept before the ball gets here
+      bestStep = step;
+      bestX = px;
+      bestY = py;
+      break; // earliest reachable — this is optimal
+    }
+  }
+
+  return { x: bestX, y: bestY, stepsAhead: bestStep * dt };
+}
+
   const carrierX = ball.position.x;
   const carrierY = ball.position.y;
   const ad = carrier.team === 'team1' ? -1 : 1;
