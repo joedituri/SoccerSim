@@ -2,7 +2,7 @@
 import { CONFIG } from './config.js';
 import { Ball } from './entities/Ball.js';
 import { BallPhysics } from './physics/ballPhysics.js';
-import { Player, getBallPossessor } from './entities/Player.js';
+import { Player } from './entities/Player.js';
 import { PlayerPhysics } from './physics/playerPhysics.js';
 import { CollisionSystem } from './physics/collision.js';
 
@@ -12,7 +12,10 @@ const ctx = canvas.getContext('2d');
 let ppm = 15;
 let offsetX = 0;
 let offsetY = 0;
-let debugOffsetY = 0;
+
+// Pre-rendered grass pattern canvas (cached)
+let grassPatternCanvas = null;
+let grassPatternPpm = 0;
 
 const ballPhysics = new BallPhysics();
 const playerPhysics = new PlayerPhysics();
@@ -166,30 +169,58 @@ function getActivePlayers() {
   return players.filter(p => p.active);
 }
 
+/** Build a cached grass-stripe canvas (mowing pattern) for the pitch area */
+function buildGrassPattern(pitch, ppm) {
+  const w = Math.ceil(pitch.width * ppm);
+  const h = Math.ceil(pitch.height * ppm);
+  const offscreen = document.createElement('canvas');
+  offscreen.width = w;
+  offscreen.height = h;
+  const gctx = offscreen.getContext('2d');
+
+  // Base green
+  gctx.fillStyle = '#3a8c2a';
+  gctx.fillRect(0, 0, w, h);
+
+  // Alternating vertical stripes (mowing lines) — ~5.25m wide (1/20 of pitch)
+  const stripeWidthM = pitch.width / 20;
+  const stripeWidthPx = stripeWidthM * ppm;
+  for (let i = 0; i < 20; i++) {
+    if (i % 2 === 0) {
+      gctx.fillStyle = 'rgba(255,255,255,0.04)';
+    } else {
+      gctx.fillStyle = 'rgba(0,0,0,0.04)';
+    }
+    gctx.fillRect(i * stripeWidthPx, 0, stripeWidthPx, h);
+  }
+
+  return offscreen;
+}
+
 function updateCanvasSize() {
   const { pitch } = CONFIG;
-  const maxWidth = Math.min(window.innerWidth - 20, 1000);
-  const maxHeight = Math.min(window.innerHeight * 0.75, 650);
+  // Margin around pitch for surrounding area (meters, scaled)
+  const marginM = 4; // meters of surround visible
+  const totalWidth = pitch.width + (pitch.goalDepth || 1) * 2 + marginM * 2;
+  const totalHeight = pitch.height + marginM * 2;
 
-  const totalWidth = pitch.width + (pitch.goalDepth || 1) * 2;
-  const totalHeight = pitch.height;
+  const maxWidth = Math.min(window.innerWidth - 20, 1400);
+  const maxHeight = Math.min(window.innerHeight - 80, 900);
 
   ppm = Math.min(15, maxWidth / totalWidth, maxHeight / totalHeight);
   ppm = Math.max(5, ppm);
 
-  const PITCH_HEIGHT = Math.ceil(totalHeight * ppm);
-  const DEBUG_HEIGHT = 160; // pixels for the debug panel below the pitch
-
   canvas.width  = Math.ceil(totalWidth  * ppm);
-  canvas.height = PITCH_HEIGHT + DEBUG_HEIGHT;
+  canvas.height = Math.ceil(totalHeight * ppm);
 
-  offsetX = (pitch.goalDepth || 1) * ppm;
-  debugOffsetY = PITCH_HEIGHT; // pitch renders at top, debug panel below
+  offsetX = ((pitch.goalDepth || 1) + marginM) * ppm;
+  offsetY = marginM * ppm;
 
-  const label = pitch.name || 'Pitch';
-  const mode  = pitch.width > 60 ? '11v11+GK' : '5v5+GK';
-  document.getElementById('fieldInfo').textContent =
-    `${label} · ${pitch.width}×${pitch.height} m · ${mode}`;
+  // Rebuild grass pattern cache when ppm changes
+  if (Math.abs(grassPatternPpm - ppm) > 0.01) {
+    grassPatternCanvas = buildGrassPattern(pitch, ppm);
+    grassPatternPpm = ppm;
+  }
 }
 
 function loop() {
@@ -318,26 +349,49 @@ function resetAfterGoal() {
 }
 
 function updateStats() {
+  // Score/time now rendered on canvas via drawScoreboard(); keep DOM in sync for accessibility
   const mins = Math.floor(gameTime / 60);
   const secs = Math.floor(gameTime % 60);
-  document.getElementById('timeDisplay').textContent = `${mins}:${secs.toString().padStart(2, '0')}`;
-  document.getElementById('scoreDisplay').textContent = `RED ${score.team1} - ${score.team2} BLUE`;
+  const el = document.getElementById('timeDisplay');
+  if (el) el.textContent = `${mins}:${secs.toString().padStart(2, '0')}`;
+  const se = document.getElementById('scoreDisplay');
+  if (se) se.textContent = `RED ${score.team1} - ${score.team2} BLUE`;
 }
 
 function render() {
   try {
-    ctx.fillStyle = CONFIG.rendering.pitchColor;
+    // Dark surround area
+    ctx.fillStyle = '#2a5a1a';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
+
     ctx.save();
     ctx.translate(offsetX, offsetY);
+
+    // Draw grass pattern
+    if (grassPatternCanvas) {
+      ctx.drawImage(grassPatternCanvas, 0, 0);
+    } else {
+      ctx.fillStyle = '#3a8c2a';
+      ctx.fillRect(0, 0, CONFIG.pitch.width * ppm, CONFIG.pitch.height * ppm);
+    }
+
     drawPitch();
-    getActivePlayers().forEach(p => drawPlayer(p));
-    drawPassIndicators();
+
+    // Draw player shadows first (underneath all players)
+    const active = getActivePlayers();
+    active.forEach(p => drawPlayerShadow(p));
+
+    // Draw players sorted by y-position for pseudo-depth
+    const sorted = [...active].sort((a, b) => a.position.y - b.position.y);
+    sorted.forEach(p => drawPlayer(p));
+
     drawBall();
     ctx.restore();
+
+    // Overlays
+    drawScoreboard();
     if (goalFlashTeam) drawGoalFlash();
     if (isPaused) drawPauseOverlay();
-    drawDebugPanel();
   } catch(e) {
     console.error('Render error:', e.message);
     try { ctx.restore(); } catch(_) {}
@@ -345,233 +399,213 @@ function render() {
 }
 
 function drawGoalFlash() {
-  const alpha = 0.22 + 0.08 * Math.sin(performance.now() / 200);
-  ctx.fillStyle = `rgba(255, 220, 60, ${alpha})`;
+  const elapsed = performance.now() - (goalFlashUntil - 1200);
+  const progress = Math.min(1, elapsed / 1200);
+
+  // Darkened overlay
+  ctx.fillStyle = `rgba(0,0,0,${0.3 + 0.1 * Math.sin(elapsed / 150)})`;
   ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  // Banner background
+  const bannerH = 70;
+  const bannerY = canvas.height / 2 - bannerH / 2;
+  const teamColor = goalFlashTeam === 'team1' ? 'rgba(230,57,70,0.9)' : 'rgba(69,123,157,0.9)';
+  ctx.fillStyle = teamColor;
+  ctx.fillRect(0, bannerY, canvas.width, bannerH);
+
+  // White accent lines
+  ctx.strokeStyle = 'rgba(255,255,255,0.6)';
+  ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(0, bannerY); ctx.lineTo(canvas.width, bannerY); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(0, bannerY + bannerH); ctx.lineTo(canvas.width, bannerY + bannerH); ctx.stroke();
+
+  // GOAL text
   const name = goalFlashTeam === 'team1' ? 'RED' : 'BLUE';
-  ctx.fillStyle = '#fff';
-  ctx.font = 'bold 36px monospace';
+  ctx.fillStyle = '#FFFFFF';
+  ctx.font = `bold ${Math.min(48, canvas.width * 0.06)}px sans-serif`;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.fillText('GOAL!', canvas.width / 2, canvas.height / 2 - 28);
-  ctx.font = 'bold 22px monospace';
-  ctx.fillStyle = goalFlashTeam === 'team1' ? '#ff6b6b' : '#74c0fc';
-  ctx.fillText(name, canvas.width / 2, canvas.height / 2 + 22);
+  ctx.fillText('GOAL!', canvas.width / 2, canvas.height / 2 - 6);
+  ctx.font = `${Math.min(20, canvas.width * 0.025)}px sans-serif`;
+  ctx.fillStyle = 'rgba(255,255,255,0.8)';
+  ctx.fillText(`${name}  ${score.team1} - ${score.team2}`, canvas.width / 2, canvas.height / 2 + 22);
 }
 
-function drawPassIndicators() {
-  // Find the ball carrier
-  const active = getActivePlayers();
-  let carrier = null;
-  let minDist = Infinity;
-  for (const p of active) {
-    if (p.isGoalkeeper) continue;
-    const d = p.distanceTo(ball.position);
-    if (d < p.influenceRadius + ball.radius && d < minDist) {
-      minDist = d;
-      carrier = p;
-    }
-  }
-  if (!carrier || !carrier._passTargetOptions || carrier._passTargetOptions.length === 0) return;
+/** Broadcast-style scoreboard overlay at top center of canvas */
+function drawScoreboard() {
+  const w = Math.min(280, canvas.width * 0.4);
+  const h = 36;
+  const x = (canvas.width - w) / 2;
+  const y = 8;
+  const r = 4; // border radius
 
-  // Draw indicators for top 3 pass targets (filter out any stale/invalid entries)
-  const options = carrier._passTargetOptions.filter(opt => opt && opt.player && opt.player.active);
-  const colors = ['#00FF88', '#FFD700', '#FF8C00']; // gold, silver, bronze
-  const labels = ['1st', '2nd', '3rd'];
+  // Background
+  ctx.fillStyle = 'rgba(15,15,15,0.82)';
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.lineTo(x + w - r, y);
+  ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+  ctx.lineTo(x + w, y + h - r);
+  ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+  ctx.lineTo(x + r, y + h);
+  ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+  ctx.lineTo(x, y + r);
+  ctx.quadraticCurveTo(x, y, x + r, y);
+  ctx.closePath();
+  ctx.fill();
 
-  options.forEach((opt, i) => {
-    const t = opt.player;
-    if (!t || !t.position) return;
-    const cx = t.position.x * ppm;
-    const cy = t.position.y * ppm;
-    const color = colors[i] || '#888888';
+  // Subtle border
+  ctx.strokeStyle = 'rgba(255,255,255,0.12)';
+  ctx.lineWidth = 1;
+  ctx.stroke();
 
-    // Pulsing ring around the target
-    const pulse = 1 + 0.08 * Math.sin(performance.now() / 250 + i);
-    const outerR = (t.radius + 0.6) * ppm * pulse;
-    const innerR = (t.radius + 0.3) * ppm;
+  const mid = x + w / 2;
+  const fontSize = Math.min(15, h * 0.42);
+  const smallFont = Math.min(10, h * 0.28);
 
-    ctx.beginPath();
-    ctx.arc(cx, cy, outerR, 0, Math.PI * 2);
-    ctx.strokeStyle = color;
-    ctx.lineWidth = 2.5;
-    ctx.globalAlpha = 0.8;
-    ctx.stroke();
-    ctx.globalAlpha = 1;
+  // Team color badges
+  const badgeW = 4;
+  ctx.fillStyle = '#e63946';
+  ctx.fillRect(x + 1, y + 1, badgeW, h - 2);
+  ctx.fillStyle = '#457b9d';
+  ctx.fillRect(x + w - badgeW - 1, y + 1, badgeW, h - 2);
 
-    // Small label
-    ctx.fillStyle = color;
-    ctx.font = `bold 9px monospace`;
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'bottom';
-    ctx.fillText(labels[i], cx, cy - outerR - 2);
+  // Team names
+  ctx.fillStyle = '#e63946';
+  ctx.font = `bold ${fontSize}px sans-serif`;
+  ctx.textAlign = 'right';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('RED', mid - 30, y + h / 2);
 
-    // Draw dotted pass line from carrier to target
-    if (opt.leadPos) {
-      ctx.beginPath();
-      ctx.setLineDash([4, 4]);
-      ctx.moveTo(ball.position.x * ppm, ball.position.y * ppm);
-      ctx.lineTo(opt.leadPos.x * ppm, opt.leadPos.y * ppm);
-      ctx.strokeStyle = opt.laneClear ? 'rgba(0,255,136,0.4)' : 'rgba(255,80,80,0.35)';
-      ctx.lineWidth = 1.5;
-      ctx.stroke();
-      ctx.setLineDash([]);
+  ctx.fillStyle = '#457b9d';
+  ctx.textAlign = 'left';
+  ctx.fillText('BLUE', mid + 30, y + h / 2);
 
-      // Lead position dot
-      ctx.beginPath();
-      ctx.arc(opt.leadPos.x * ppm, opt.leadPos.y * ppm, 3, 0, Math.PI * 2);
-      ctx.fillStyle = opt.laneClear ? 'rgba(0,255,136,0.5)' : 'rgba(255,80,80,0.5)';
-      ctx.fill();
-    }
-  });
-
-  // Label carrier
-  const ccx = carrier.position.x * ppm;
-  const ccy = carrier.position.y * ppm;
-  ctx.fillStyle = '#ffffff';
-  ctx.font = 'bold 8px monospace';
+  // Score
+  ctx.fillStyle = '#FFFFFF';
+  ctx.font = `bold ${fontSize + 2}px sans-serif`;
   ctx.textAlign = 'center';
-  ctx.textBaseline = 'bottom';
-  ctx.fillText('⚡ CARRYING', ccx, ccy - (carrier.radius + 0.7) * ppm);
+  ctx.fillText(`${score.team1} - ${score.team2}`, mid, y + h / 2);
+
+  // Time (bottom-right of scoreboard)
+  const mins = Math.floor(gameTime / 60);
+  const secs = Math.floor(gameTime % 60);
+  ctx.fillStyle = 'rgba(255,255,255,0.6)';
+  ctx.font = `${smallFont}px sans-serif`;
+  ctx.textAlign = 'center';
+  ctx.fillText(`${mins}:${secs.toString().padStart(2, '0')}`, mid, y + h + smallFont + 2);
 }
 
 function drawPauseOverlay() {
-  ctx.fillStyle = 'rgba(0, 0, 0, 0.55)';
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.45)';
   ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  // Rounded pill
+  const pw = Math.min(260, canvas.width * 0.3);
+  const ph = 40;
+  const px = (canvas.width - pw) / 2;
+  const py = (canvas.height - ph) / 2;
+  ctx.fillStyle = 'rgba(0,0,0,0.7)';
+  ctx.beginPath();
+  ctx.moveTo(px + ph / 2, py);
+  ctx.lineTo(px + pw - ph / 2, py);
+  ctx.arc(px + pw - ph / 2, py + ph / 2, ph / 2, -Math.PI / 2, Math.PI / 2);
+  ctx.lineTo(px + ph / 2, py + ph);
+  ctx.arc(px + ph / 2, py + ph / 2, ph / 2, Math.PI / 2, -Math.PI / 2);
+  ctx.closePath();
+  ctx.fill();
+
   ctx.fillStyle = '#fff';
-  ctx.font = 'bold 32px monospace';
+  ctx.font = `bold ${Math.min(16, ph * 0.4)}px sans-serif`;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.fillText('⏸  PAUSED  —  Press SPACE to resume', canvas.width / 2, canvas.height / 2);
+  ctx.fillText('PAUSED  \u2014  SPACE to resume', canvas.width / 2, canvas.height / 2);
 }
 
-function drawDebugPanel() {
-  const active = getActivePlayers();
-  const startY = debugOffsetY + 8;
-  const rowH = 13;
-  const team1Players = active.filter(p => p.team === 'team1').sort((a,b) => a.id - b.id);
-  const team2Players = active.filter(p => p.team === 'team2').sort((a,b) => a.id - b.id);
-
-  ctx.save();
-
-  // Background
-  ctx.fillStyle = '#0d1117';
-  ctx.fillRect(0, debugOffsetY, canvas.width, 160);
-
-  // Header
-  ctx.font = 'bold 9px monospace';
-  ctx.fillStyle = '#8b949e';
-  ctx.textAlign = 'left';
-  ctx.textBaseline = 'top';
-  ctx.fillText('T', 6, startY);
-  ctx.fillText('ID', 26, startY);
-  ctx.fillText('ROLE', 46, startY);
-  ctx.fillText('DIST', 80, startY);
-  ctx.fillText('SPD', 112, startY);
-  ctx.fillText('STATE', 140, startY);
-  ctx.fillText('BALL', 230, startY);
-
-  // Divider
-  ctx.strokeStyle = '#21262d';
-  ctx.lineWidth = 1;
-  ctx.beginPath();
-  ctx.moveTo(0, startY + 14);
-  ctx.lineTo(canvas.width, startY + 14);
-  ctx.stroke();
-
-  function drawPlayerRow(p, y, color) {
-    const dist = p.distanceTo(ball.position);
-    const spd = p.getSpeed();
-    const state = getPlayerStateLabel(p, ball);
-
-    ctx.font = '9px monospace';
-    ctx.textAlign = 'left';
-    ctx.textBaseline = 'top';
-
-    ctx.fillStyle = color;
-    ctx.fillText(p.team === 'team1' ? 'T1' : 'T2', 6, y);
-    ctx.fillText(`#${p.id}`, 26, y);
-    ctx.fillText((p.role || '?').slice(0, 10), 46, y);
-    ctx.fillStyle = dist < 2 ? '#ff6b6b' : dist < 8 ? '#ffd93d' : '#8b949e';
-    ctx.fillText(dist.toFixed(1), 80, y);
-    ctx.fillStyle = spd > p.maxSpeed * 0.8 ? '#ff6b6b' : '#8b949e';
-    ctx.fillText(spd.toFixed(1), 112, y);
-    ctx.fillStyle = '#c9d1d9';
-    ctx.fillText(state, 140, y);
-    ctx.fillStyle = '#8b949e';
-    ctx.fillText(ball.isAirborne ? 'AIR' : ball.heldBy ? 'HELD' : 'RUN', 230, y);
-  }
-
-  // Team 1
-  team1Players.forEach((p, i) => drawPlayerRow(p, startY + 18 + i * rowH, '#ff6b6b'));
-
-  // Separator
-  const sepY = startY + 18 + team1Players.length * rowH + 4;
-  ctx.strokeStyle = '#30363d';
-  ctx.beginPath();
-  ctx.moveTo(0, sepY);
-  ctx.lineTo(canvas.width, sepY);
-  ctx.stroke();
-
-  // Team 2
-  team2Players.forEach((p, i) => drawPlayerRow(p, sepY + 8 + i * rowH, '#74c0fc'));
-
-  // Hint
-  ctx.fillStyle = '#484f58';
-  ctx.font = '8px monospace';
-  ctx.textAlign = 'right';
-  ctx.textBaseline = 'bottom';
-  ctx.fillText('SPACE = pause/resume', canvas.width - 6, debugOffsetY + 156);
-
-  ctx.restore();
-}
-
-function getPlayerStateLabel(p, ball) {
-  if (p.isGoalkeeper) {
-    if (p.isDiving) return 'DIVING';
-    if (p.holdingBall) return 'HOLDING';
-    return 'GK';
-  }
-  if (p._oneTwoActive) return '1-2 RUN';
-  if (p._isRunningBehind) return 'RUN-BEHIND';
-  if (p._ballCarrierTime > 3) return 'CARRYING';
-  if (p.kickCooldown > 0) return 'KICK-CD';
-  const dist = p.distanceTo(ball.position);
-  if (dist < p.influenceRadius + ball.radius) return 'NEAR BALL';
-  const possessor = getBallPossessor(ball, getActivePlayers());
-  if (possessor && possessor.team === p.team && possessor !== p) return 'SUPPORT';
-  if (possessor && possessor.team !== p.team) return 'CHASING';
-  return 'IDLE';
-}
 
 function drawPitch() {
   const { pitch } = CONFIG;
-  ctx.strokeStyle = CONFIG.rendering.lineColor;
-  ctx.lineWidth = 2;
+  const lw = Math.max(1.5, ppm * 0.12); // line width scales with zoom
+  ctx.strokeStyle = 'rgba(255,255,255,0.85)';
+  ctx.lineWidth = lw;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
 
-  ctx.strokeRect(0, 0, pitch.width * ppm, pitch.height * ppm);
+  const W = pitch.width * ppm;
+  const H = pitch.height * ppm;
+  const cx = W / 2;
+  const cy = H / 2;
 
+  // Outer boundary
+  ctx.strokeRect(0, 0, W, H);
+
+  // Halfway line
   ctx.beginPath();
-  ctx.moveTo((pitch.width / 2) * ppm, 0);
-  ctx.lineTo((pitch.width / 2) * ppm, pitch.height * ppm);
+  ctx.moveTo(cx, 0);
+  ctx.lineTo(cx, H);
   ctx.stroke();
 
+  // Center circle (9.15m radius for 11v11)
+  const ccr = (pitch.width > 60 ? 9.15 : pitch.centerSpotRadius) * ppm;
   ctx.beginPath();
-  ctx.arc((pitch.width / 2) * ppm, (pitch.height / 2) * ppm, pitch.centerSpotRadius * ppm, 0, Math.PI * 2);
+  ctx.arc(cx, cy, ccr, 0, Math.PI * 2);
   ctx.stroke();
 
+  // Center spot
+  ctx.fillStyle = 'rgba(255,255,255,0.85)';
   ctx.beginPath();
-  ctx.arc((pitch.width / 2) * ppm, (pitch.height / 2) * ppm, 3, 0, Math.PI * 2);
-  ctx.fillStyle = CONFIG.rendering.lineColor;
+  ctx.arc(cx, cy, Math.max(2, ppm * 0.1), 0, Math.PI * 2);
   ctx.fill();
 
+  // Penalty areas
   const penaltyY = (pitch.height - pitch.penaltyAreaHeight) / 2;
   ctx.strokeRect(0, penaltyY * ppm, pitch.penaltyAreaWidth * ppm, pitch.penaltyAreaHeight * ppm);
   ctx.strokeRect((pitch.width - pitch.penaltyAreaWidth) * ppm, penaltyY * ppm, pitch.penaltyAreaWidth * ppm, pitch.penaltyAreaHeight * ppm);
 
+  // Goal areas (6-yard box)
   const goalAreaY = (pitch.height - pitch.goalAreaHeight) / 2;
   ctx.strokeRect(0, goalAreaY * ppm, pitch.goalAreaWidth * ppm, pitch.goalAreaHeight * ppm);
   ctx.strokeRect((pitch.width - pitch.goalAreaWidth) * ppm, goalAreaY * ppm, pitch.goalAreaWidth * ppm, pitch.goalAreaHeight * ppm);
+
+  // Penalty spots
+  const penSpotR = Math.max(1.5, ppm * 0.08);
+  ctx.fillStyle = 'rgba(255,255,255,0.85)';
+  ctx.beginPath();
+  ctx.arc(pitch.penaltySpotDistance * ppm, cy, penSpotR, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc((pitch.width - pitch.penaltySpotDistance) * ppm, cy, penSpotR, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Penalty arcs (the "D" outside the penalty area)
+  if (pitch.width > 60) {
+    const penArcR = 9.15 * ppm; // same as center circle
+    const penBoxEdge = pitch.penaltyAreaWidth * ppm;
+    // Left penalty arc
+    const leftPenX = pitch.penaltySpotDistance * ppm;
+    const halfAngle = Math.acos((penBoxEdge - leftPenX) / penArcR);
+    ctx.beginPath();
+    ctx.arc(leftPenX, cy, penArcR, -halfAngle, halfAngle);
+    ctx.stroke();
+    // Right penalty arc
+    const rightPenX = (pitch.width - pitch.penaltySpotDistance) * ppm;
+    const rightBoxEdge = (pitch.width - pitch.penaltyAreaWidth) * ppm;
+    const halfAngleR = Math.acos((rightPenX - rightBoxEdge) / penArcR);
+    ctx.beginPath();
+    ctx.arc(rightPenX, cy, penArcR, Math.PI - halfAngleR, Math.PI + halfAngleR);
+    ctx.stroke();
+  }
+
+  // Corner arcs
+  const cornerR = (pitch.width > 60 ? 1.0 : 0.5) * ppm;
+  // Top-left
+  ctx.beginPath(); ctx.arc(0, 0, cornerR, 0, Math.PI / 2); ctx.stroke();
+  // Top-right
+  ctx.beginPath(); ctx.arc(W, 0, cornerR, Math.PI / 2, Math.PI); ctx.stroke();
+  // Bottom-left
+  ctx.beginPath(); ctx.arc(0, H, cornerR, -Math.PI / 2, 0); ctx.stroke();
+  // Bottom-right
+  ctx.beginPath(); ctx.arc(W, H, cornerR, Math.PI, Math.PI * 1.5); ctx.stroke();
 
   drawGoals();
 }
@@ -581,17 +615,46 @@ function drawGoals() {
   const goalWidth = pitch.goalWidth || 3;
   const goalDepth = pitch.goalDepth || 0.5;
   const goalY = (pitch.height - goalWidth) / 2;
+  const postW = Math.max(2, ppm * 0.15);
 
+  // Net fill (semi-transparent white)
+  ctx.fillStyle = 'rgba(255,255,255,0.12)';
+
+  // Left goal net fill
+  ctx.fillRect(-goalDepth * ppm, goalY * ppm, goalDepth * ppm, goalWidth * ppm);
+  // Right goal net fill
+  ctx.fillRect(pitch.width * ppm, goalY * ppm, goalDepth * ppm, goalWidth * ppm);
+
+  // Net mesh pattern
+  ctx.strokeStyle = 'rgba(255,255,255,0.18)';
+  ctx.lineWidth = 0.5;
+  const meshSpacing = Math.max(3, ppm * 0.3);
+  // Left goal mesh
+  for (let y = goalY * ppm; y <= (goalY + goalWidth) * ppm; y += meshSpacing) {
+    ctx.beginPath(); ctx.moveTo(-goalDepth * ppm, y); ctx.lineTo(0, y); ctx.stroke();
+  }
+  for (let x = -goalDepth * ppm; x <= 0; x += meshSpacing) {
+    ctx.beginPath(); ctx.moveTo(x, goalY * ppm); ctx.lineTo(x, (goalY + goalWidth) * ppm); ctx.stroke();
+  }
+  // Right goal mesh
+  for (let y = goalY * ppm; y <= (goalY + goalWidth) * ppm; y += meshSpacing) {
+    ctx.beginPath(); ctx.moveTo(pitch.width * ppm, y); ctx.lineTo((pitch.width + goalDepth) * ppm, y); ctx.stroke();
+  }
+  for (let x = pitch.width * ppm; x <= (pitch.width + goalDepth) * ppm; x += meshSpacing) {
+    ctx.beginPath(); ctx.moveTo(x, goalY * ppm); ctx.lineTo(x, (goalY + goalWidth) * ppm); ctx.stroke();
+  }
+
+  // Goal posts (thick white)
   ctx.strokeStyle = '#FFFFFF';
-  ctx.lineWidth = 3;
-
+  ctx.lineWidth = postW;
+  // Left goal frame
   ctx.beginPath();
   ctx.moveTo(0, goalY * ppm);
   ctx.lineTo(-goalDepth * ppm, goalY * ppm);
   ctx.lineTo(-goalDepth * ppm, (goalY + goalWidth) * ppm);
   ctx.lineTo(0, (goalY + goalWidth) * ppm);
   ctx.stroke();
-
+  // Right goal frame
   ctx.beginPath();
   ctx.moveTo(pitch.width * ppm, goalY * ppm);
   ctx.lineTo((pitch.width + goalDepth) * ppm, goalY * ppm);
@@ -601,93 +664,126 @@ function drawGoals() {
 }
 
 function drawBall() {
-  const ballX = ball.position.x * ppm;
-  const ballY = (ball.position.y - ball.height) * ppm;
-  const ballRadius = Math.max(3, ball.radius * ppm);
+  const groundX = ball.position.x * ppm;
+  const groundY = ball.position.y * ppm;
+  const heightPx = ball.height * ppm * 3; // exaggerate height for visibility
+  const ballX = groundX;
+  const ballY = groundY - heightPx;
+  const ballRadius = Math.max(2.5, ball.radius * ppm);
 
-  if (ball.height > 0) {
-    ctx.fillStyle = 'rgba(0,0,0,0.3)';
-    ctx.beginPath();
-    ctx.ellipse(ball.position.x * ppm, ball.position.y * ppm + ball.height * ppm * 2,
-      ballRadius * (1 + ball.height * 0.5), ballRadius * 0.5 * (1 + ball.height * 0.5), 0, 0, Math.PI * 2);
-    ctx.fill();
-  }
+  // Drop shadow (separates from ball when airborne)
+  const shadowAlpha = Math.max(0.08, 0.22 - ball.height * 0.15);
+  const shadowScale = 1 + ball.height * 0.8;
+  ctx.fillStyle = `rgba(0,0,0,${shadowAlpha})`;
+  ctx.beginPath();
+  ctx.ellipse(groundX + 1, groundY + 1, ballRadius * shadowScale, ballRadius * 0.4 * shadowScale, 0, 0, Math.PI * 2);
+  ctx.fill();
 
+  // Ball
   ctx.save();
   ctx.translate(ballX, ballY);
   ctx.rotate(ball.rotation);
 
+  // White body
   ctx.fillStyle = '#FFFFFF';
   ctx.beginPath();
   ctx.arc(0, 0, ballRadius, 0, Math.PI * 2);
   ctx.fill();
 
-  ctx.strokeStyle = '#333333';
-  ctx.lineWidth = 1;
-  ctx.stroke();
-
-  ctx.fillStyle = '#1a1a1a';
-  ctx.beginPath();
+  // Pentagon pattern
+  ctx.fillStyle = '#222';
   for (let i = 0; i < 5; i++) {
-    const angle = (i * 2 * Math.PI / 5) - Math.PI / 2;
-    const px = Math.cos(angle) * ballRadius * 0.35;
-    const py = Math.sin(angle) * ballRadius * 0.35;
-    if (i === 0) ctx.moveTo(px, py);
-    else ctx.lineTo(px, py);
+    const a = (i * 2 * Math.PI / 5) - Math.PI / 2;
+    const cx = Math.cos(a) * ballRadius * 0.42;
+    const cy = Math.sin(a) * ballRadius * 0.42;
+    ctx.beginPath();
+    for (let j = 0; j < 5; j++) {
+      const pa = (j * 2 * Math.PI / 5) - Math.PI / 2 + a;
+      const ppx = cx + Math.cos(pa) * ballRadius * 0.18;
+      const ppy = cy + Math.sin(pa) * ballRadius * 0.18;
+      if (j === 0) ctx.moveTo(ppx, ppy); else ctx.lineTo(ppx, ppy);
+    }
+    ctx.closePath();
+    ctx.fill();
   }
-  ctx.closePath();
-  ctx.fill();
+
+  // Outline
+  ctx.strokeStyle = '#444';
+  ctx.lineWidth = Math.max(0.5, ppm * 0.04);
+  ctx.beginPath();
+  ctx.arc(0, 0, ballRadius, 0, Math.PI * 2);
+  ctx.stroke();
 
   ctx.restore();
 }
 
-function drawPlayer(p) {
-  const color = p.team === 'team1' ? '#FF4444' : '#4444FF';
-  const drawRadius = Math.max(5, p.radius * ppm);
+function drawPlayerShadow(p) {
+  const px = p.position.x * ppm;
+  const py = p.position.y * ppm;
+  const r = Math.max(4, p.radius * ppm);
+  ctx.fillStyle = 'rgba(0,0,0,0.18)';
   ctx.beginPath();
-  ctx.arc(p.position.x * ppm, p.position.y * ppm, drawRadius, 0, Math.PI * 2);
-  ctx.fillStyle = color;
+  ctx.ellipse(px + r * 0.3, py + r * 0.4, r * 0.9, r * 0.45, 0, 0, Math.PI * 2);
   ctx.fill();
-  ctx.strokeStyle = '#FFFFFF';
-  ctx.lineWidth = 1.5;
-  ctx.stroke();
+}
 
+function drawPlayer(p) {
+  const px = p.position.x * ppm;
+  const py = p.position.y * ppm;
+  const r = Math.max(4, p.radius * ppm);
+
+  // Team colors — home red vs away blue; GK gets distinct color
+  let jerseyColor, shortsColor, outlineColor;
   if (p.isGoalkeeper) {
-    ctx.strokeStyle = '#00FF00';
-    ctx.lineWidth = 3;
-    ctx.stroke();
-
-    ctx.fillStyle = '#00FF00';
-    ctx.font = 'bold 10px monospace';
-    ctx.textAlign = 'center';
-    ctx.fillText('GK', p.position.x * ppm, p.position.y * ppm - drawRadius - 4);
-
-    if (p.holdingBall) {
-      ctx.fillStyle = '#FF6600';
-      ctx.beginPath();
-      ctx.arc((p.position.x + 0.4) * ppm, p.position.y * ppm, 0.15 * ppm, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.beginPath();
-      ctx.arc((p.position.x - 0.4) * ppm, p.position.y * ppm, 0.15 * ppm, 0, Math.PI * 2);
-      ctx.fill();
-    }
+    jerseyColor = p.team === 'team1' ? '#f5c542' : '#42f5a4';
+    shortsColor = p.team === 'team1' ? '#b8941f' : '#1fb87a';
+    outlineColor = p.team === 'team1' ? '#d4a017' : '#17a06a';
+  } else {
+    jerseyColor = p.team === 'team1' ? '#e63946' : '#457b9d';
+    shortsColor = p.team === 'team1' ? '#c1121f' : '#1d3557';
+    outlineColor = p.team === 'team1' ? '#a4161a' : '#14213d';
   }
 
-  ctx.strokeStyle = 'rgba(0,0,0,0.6)';
-  ctx.lineWidth = 2;
+  // "Shorts" — small lower ellipse
+  ctx.fillStyle = shortsColor;
   ctx.beginPath();
-  ctx.moveTo(p.position.x * ppm, p.position.y * ppm);
-  ctx.lineTo(p.position.x * ppm + Math.cos(p.angle) * drawRadius * 1.2,
-             p.position.y * ppm + Math.sin(p.angle) * drawRadius * 1.2);
+  ctx.ellipse(px, py + r * 0.25, r * 0.6, r * 0.4, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  // "Jersey" — main body circle
+  ctx.fillStyle = jerseyColor;
+  ctx.beginPath();
+  ctx.arc(px, py - r * 0.1, r * 0.85, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = outlineColor;
+  ctx.lineWidth = Math.max(1, ppm * 0.06);
   ctx.stroke();
 
-  if (p.isSprinting) {
-    ctx.strokeStyle = '#FFD700';
-    ctx.lineWidth = 3;
-    ctx.beginPath();
-    ctx.arc(p.position.x * ppm, p.position.y * ppm, drawRadius + 4, 0, Math.PI * 2);
-    ctx.stroke();
-  }
+  // Jersey number
+  const num = getPlayerNumber(p);
+  const fontSize = Math.max(6, r * 0.95);
+  ctx.fillStyle = '#FFFFFF';
+  ctx.font = `bold ${fontSize}px sans-serif`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(num, px, py - r * 0.08);
+
+  // Facing direction indicator (subtle)
+  ctx.strokeStyle = 'rgba(255,255,255,0.5)';
+  ctx.lineWidth = Math.max(1, ppm * 0.05);
+  ctx.beginPath();
+  ctx.moveTo(px, py - r * 0.1);
+  ctx.lineTo(px + Math.cos(p.angle) * r * 1.3, py - r * 0.1 + Math.sin(p.angle) * r * 1.3);
+  ctx.stroke();
+}
+
+/** Map player id to realistic jersey number */
+function getPlayerNumber(p) {
+  // Standard numbering: GK=1, defenders 2-5, midfield 6-8, attack 9-11
+  const teamOffset = p.team === 'team1' ? 0 : 11;
+  const localId = p.id - teamOffset;
+  const numberMap = [1, 2, 3, 4, 5, 6, 7, 8, 11, 9, 10]; // GK, LB, CB-L, CB-R, RB, DM, CM-L, CM-R, LW, ST, RW
+  return numberMap[localId] !== undefined ? numberMap[localId] : localId + 1;
 }
 
 // Field selector
@@ -698,6 +794,8 @@ function setField(type) {
   CONFIG.pitch = CONFIG.pitches[type];
   document.getElementById('btn5v5').classList.toggle('active', type === '5v5');
   document.getElementById('btn11v11').classList.toggle('active', type === '11v11');
+  // Force grass pattern rebuild for new pitch dimensions
+  grassPatternPpm = 0;
   updateCanvasSize();
 
   ball.position = { x: CONFIG.pitch.width / 2, y: CONFIG.pitch.height / 2 };
@@ -727,14 +825,20 @@ function setField(type) {
 
   ball.kick((Math.random() - 0.5) * 10, (Math.random() - 0.5) * 10, 10);
 
-  // Space to pause/resume
-  window.addEventListener('keydown', e => {
-    if (e.code === 'Space' || e.key === ' ') {
-      e.preventDefault();
-      isPaused = !isPaused;
-    }
-  });
 }
+
+// Space to pause/resume (register once)
+window.addEventListener('keydown', e => {
+  if (e.code === 'Space' || e.key === ' ') {
+    e.preventDefault();
+    isPaused = !isPaused;
+  }
+});
+
+// Resize on window change
+window.addEventListener('resize', () => {
+  updateCanvasSize();
+});
 
 updateCanvasSize();
 loop();
